@@ -41,3 +41,6 @@ class ActionManager:
             return None
         package = self._packages[package_name]
         return package.get_action(action_name)
+
+
+action_manager = ActionManager()
