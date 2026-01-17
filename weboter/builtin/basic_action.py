@@ -1,4 +1,5 @@
-from webobter.role.action import ActionBase
+from ..role.action import ActionBase
+from ..role.interface import InputFieldDeclaration, OutputFieldDeclaration
 import playwright.async_api as pw
 
 class OpenPage(ActionBase):
