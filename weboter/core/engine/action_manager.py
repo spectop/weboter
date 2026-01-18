@@ -10,6 +10,15 @@ class ActionPackage:
     def get_action(self, action_name: str) -> ActionBase | None:
         return self.actions.get(action_name, None)
     
+    # pass derived class of ActionBase, store it's instance in actions dict
+    def add_action(self, action_cls: type[ActionBase]) -> bool:
+        action_instance = action_cls()
+        action_name = action_cls.name
+        if action_name in self.actions:
+            return False
+        self.actions[action_name] = action_instance
+        return True
+
 
 class ActionManager:
     
@@ -18,14 +27,37 @@ class ActionManager:
 
     def has_package(self, name: str) -> bool:
         return name in self._packages
+    
+    def register_package(self, name: str, package) -> bool:
+        # if package is ActionPackage instance, use inner method
+        if isinstance(package, ActionPackage):
+            return self.__register_package_inner(name, package)
+        # if package is a list of ActionBase derived classes
+        if isinstance(package, list):
+            action_package = ActionPackage(name)
+            for action_cls in package:
+                action_package.add_action(action_cls)
+            return self.__register_package_inner(name, action_package)
+        # unknown package type
+        return False
 
-    def register_package(self, name: str, package: ActionPackage) -> bool:
+    def __register_package_inner(self, name: str, package: ActionPackage) -> bool:
         if name in self._packages:
             return False
         self._packages[name] = package
         return True
     
-    def replace_package(self, name: str, package: ActionPackage) -> bool:
+    def replace_package(self, name: str, package) -> bool:
+        if isinstance(package, ActionPackage):
+            return self.__replace_package_inner(name, package)
+        if isinstance(package, list):
+            action_package = ActionPackage(name)
+            for action_cls in package:
+                action_package.add_action(action_cls)
+            return self.__replace_package_inner(name, action_package)
+        return False
+
+    def __replace_package_inner(self, name: str, package: ActionPackage) -> bool:
         """
         Replace an existing action package with a new one.
         Useful for replace built-in actions with user defined actions.
