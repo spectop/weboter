@@ -2,6 +2,7 @@
 Module for Input/Output entities in Weboter.
 """
 
+# todo: do we need this ?
 class IOBase:
     """Base class for Input/Output entities."""
 

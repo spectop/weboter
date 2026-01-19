@@ -10,6 +10,7 @@ class Node:
     control: str # control logic for this node
     params: dict # fixed input used for control logic
 
+# todo: do we need Link class?
 @dataclass
 class Link:
     link_id: str # unique identifier for the link
