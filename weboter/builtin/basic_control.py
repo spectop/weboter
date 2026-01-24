@@ -1,4 +1,4 @@
-from weboter.public import ControlBase, InputFieldDeclaration, OutputFieldDeclaration
+from weboter.public.contracts import *
 
 class NextNode(ControlBase):
     """Control to specify the next node in the workflow."""

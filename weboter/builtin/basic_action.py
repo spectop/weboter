@@ -1,4 +1,4 @@
-from weboter.public import ActionBase, InputFieldDeclaration, OutputFieldDeclaration
+from weboter.public.contracts import *
 import playwright.async_api as pw
 
 class OpenPage(ActionBase):
