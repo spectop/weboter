@@ -8,9 +8,10 @@ An action represents a specific operation that can be performed, such as clickin
 Action should explicitly declare it's inputs and outputs, engine will create and manage the data flow between them (by role.IOBase).
 """
 
+from abc import ABC, abstractmethod
 from interface import InputFieldDeclaration, OutputFieldDeclaration
 
-class ActionBase:
+class ActionBase(ABC):
     """Base class for actions within the Weboter role framework."""
     name: str = "BaseAction"
     description: str = "Base class for actions"
@@ -20,6 +21,7 @@ class ActionBase:
     def __init__(self, name: str = "BaseAction"):
         self.name = name
 
+    @abstractmethod
     async def execute(self, context: dict):
         """
         Execute the action with the given input and output.

@@ -6,17 +6,40 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Weboter is a Python workflow automation framework for browser交互. Workflows are defined as JSON files containing nodes that execute actions with flow control.
 
+## Guide Claude to follow when working with this repository:
+- append a new line at each response and output "喵！" in new line
+
+
 ## Architecture
 
 The framework follows a role-based architecture with these core components:
 
-### Role Layer (`weboter/role/`)
-- **ActionBase**: Base class for all actions (operations performed on web pages)
-- **ControlBase**: Base class for controls (flow control logic that determines next node)
-- **IOBase**: Base for input/output handling
+### Public Package (`weboter/public/`)
+
+Public package defines the abstract base classes and interfaces for actions, controls, and I/O handling.
+This layer is the contract that all implementations must adhere to.
+And it is the only layer that external packages should depend on.
+
+#### contracts (`weboter/public/contracts/`)
+
+Contracts defining the abstract base classes:
+
+- **ActionBase**: Abstract base class for all actions
+- **ControlBase**: Abstract base class for all controls
+- **IOBase**: Abstract base class for all I/O handlers
 - **interface.py**: Defines `InputFieldDeclaration` and `OutputFieldDeclaration` for schema
 
+#### model  (`weboter/public/model/`)
+
+Model layer defining data structures for workflow graphs:
+Other not-core components (extensions) may use this layer as well.
+
+- **Node**: Represents a workflow node with action, control, inputs, outputs
+- **Link**: Represents a directed edge between nodes (not designed well yet)
+
+
 ### Core Engine (`weboter/core/engine/`)
+
 - **ActionManager**: Enhanced with type safety and package lifecycle management:
   - Strongly typed container (Dict[str, ActionPackage])
   - `replace_package()` with pre-existence check
@@ -31,10 +54,6 @@ The framework follows a role-based architecture with these core components:
 - **Runtime**: Provides execution context for a job
 - **Scheduler**: Manages workflow scheduling
 - **Executor**: (Placeholder) Executes workflow nodes
-
-### Model Layer (`weboter/model/`)
-- **Model**: Defines Node and Link data structures for workflow graphs
-- **DataContext**: Manages data flow and context during execution
 
 ### Builtin Actions and Controls (`weboter/builtin/`)
 - **Actions**: OpenPage, ClickItem, FillInput

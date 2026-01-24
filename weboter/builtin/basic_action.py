@@ -1,5 +1,5 @@
-from ..role.action import ActionBase
-from ..role.interface import InputFieldDeclaration, OutputFieldDeclaration
+from ..public.contracts.action import ActionBase
+from ..public.contracts.interface import InputFieldDeclaration, OutputFieldDeclaration
 import playwright.async_api as pw
 
 class OpenPage(ActionBase):

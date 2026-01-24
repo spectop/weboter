@@ -1,5 +1,4 @@
-from weboter.role.action import ActionBase
-
+from weboter.public.contracts.action import ActionBase
 
 class ActionPackage:
 

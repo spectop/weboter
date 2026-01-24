@@ -1,4 +1,4 @@
-from weboter.role.control import ControlBase
+from weboter.public.contracts.control import ControlBase
 
 class ControlPackage:
 
