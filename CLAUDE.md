@@ -78,3 +78,8 @@ Environment variables are referenced as `$env{variable_name}` in input values.
 ## Naming Convention
 
 Action and control registration uses dotted names: `builtin.OpenPage`, `custom.MyAction`. The first part is the package module name (set in `package_name` variable), the second is the class name.
+
+## Design  Documentation
+
+  - doc/design/engine_architecture.md - Core execution flow and MCP integration 
+  - doc/design/ai_integration.md (Upcoming) - Error recovery protocols
