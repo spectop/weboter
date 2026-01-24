@@ -19,10 +19,12 @@ class ControlPackage:
         return True
 
 
+from typing import Dict, Type, List, Union
+
 class ControlManager:
 
     def __init__(self):
-        self._packages = {}
+        self._packages: Dict[str, ControlPackage] = {}
 
     def has_package(self, name: str) -> bool:
         return name in self._packages
@@ -46,7 +48,12 @@ class ControlManager:
         self._packages[name] = package
         return True
     
-    def replace_package(self, name: str, package) -> bool:
+    def replace_package(self, name: str, package: Union[ControlPackage, List[Type[ControlBase]]]) -> bool:
+        """替换已注册的包（必须先存在）"""
+        # 存在性检查
+        if not self.has_package(name):
+            return False
+
         if isinstance(package, ControlPackage):
             return self.__replace_package_inner(name, package)
         if isinstance(package, list):
@@ -54,6 +61,13 @@ class ControlManager:
             for control_cls in package:
                 control_package.add_control(control_cls)
             return self.__replace_package_inner(name, control_package)
+        return False
+
+    def unregister_package(self, name: str) -> bool:
+        """卸载指定的包"""
+        if name in self._packages:
+            del self._packages[name]
+            return True
         return False
 
     def __replace_package_inner(self, name: str, package: ControlPackage) -> bool:

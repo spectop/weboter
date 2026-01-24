@@ -20,10 +20,12 @@ class ActionPackage:
         return True
 
 
+from typing import Dict, Type, List, Union
+
 class ActionManager:
-    
+
     def __init__(self):
-        self._packages = {}
+        self._packages: Dict[str, ActionPackage] = {}
 
     def has_package(self, name: str) -> bool:
         return name in self._packages
@@ -47,7 +49,12 @@ class ActionManager:
         self._packages[name] = package
         return True
     
-    def replace_package(self, name: str, package) -> bool:
+    def replace_package(self, name: str, package: Union[ActionPackage, List[Type[ActionBase]]]) -> bool:
+        """替换已注册的包（必须先存在）"""
+        # 存在性检查
+        if not self.has_package(name):
+            return False
+
         if isinstance(package, ActionPackage):
             return self.__replace_package_inner(name, package)
         if isinstance(package, list):
@@ -55,6 +62,13 @@ class ActionManager:
             for action_cls in package:
                 action_package.add_action(action_cls)
             return self.__replace_package_inner(name, action_package)
+        return False
+
+    def unregister_package(self, name: str) -> bool:
+        """卸载指定的包"""
+        if name in self._packages:
+            del self._packages[name]
+            return True
         return False
 
     def __replace_package_inner(self, name: str, package: ActionPackage) -> bool:
