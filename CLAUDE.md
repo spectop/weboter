@@ -100,5 +100,6 @@ Action and control registration uses dotted names: `builtin.OpenPage`, `custom.M
 
 ## Design  Documentation
 
+  - doc/workflow.md - Guidelines for workflow configuration
   - doc/design/engine_architecture.md - Core execution flow and MCP integration 
   - doc/design/ai_integration.md (Upcoming) - Error recovery protocols
