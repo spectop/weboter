@@ -23,7 +23,7 @@
 - name: 节点名称，用于展示
 - description: 节点描述，用于展示
 - action: 该节点执行的动作
-- input: 给 `action` 的输入
+- inputs: 给 `action` 的输入
 - control: 该节点的执行控制，一般多为 `builtin.NextNode` 表示无条件到下个节点
 - params: 控制参数，给 `control` 的输入
 
@@ -45,7 +45,7 @@
 
 每个动作可能需要不同的输入，具体请参考各个动作的文档说明。
 
-## input
+## inputs
 
 **可选项**，表示给 `action` 的输入参数。
 输入参数的格式和内容取决于具体的 `action`。

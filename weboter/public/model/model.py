@@ -1,27 +1,21 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Dict, List
 
 @dataclass
 class Node:
-    node_id: str # unique identifier for the node
+    """表示工作流节点"""
+    node_id: str  # 节点唯一标识
     name: str # name of the node
     description: str # description of the node
-    action: str # action to be performed at this node
-    input: dict # fixed input for this node
-    control: str # control logic for this node
-    params: dict # fixed input used for control logic
-
-# todo: do we need Link class?
-@dataclass
-class Link:
-    link_id: str # unique identifier for the link
-    prev: str # node_id of the previous node, _start_ means start node
-    next: str # node_id of the next node
-    input: dict # input data flows to next node
+    action: str  # 格式: "package.ActionClass"
+    inputs: Dict[str, str] = field(default_factory=dict)  # 输入参数
+    control: str = ""  # 流程控制 格式: "package.ControlClass"
+    param: Dict[str, str] = field(default_factory=dict)  # 控制参数
 
 @dataclass
 class Flow:
-    flow_id: str # unique identifier for the flow
-    name: str # name of the flow
-    description: str # description of the flow
-    nodes: list[Node] # list of nodes in the flow
-    links: list[Link] # list of links between nodes
+    """表示工作流定义"""
+    flow_id: str  # 工作流唯一标识
+    name: str # name of the node
+    description: str # description of the node
+    nodes: List[Node] = field(default_factory=list)  # 节点列表
