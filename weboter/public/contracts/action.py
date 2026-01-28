@@ -9,7 +9,7 @@ Action should explicitly declare it's inputs and outputs, engine will create and
 """
 
 from abc import ABC, abstractmethod
-from interface import InputFieldDeclaration, OutputFieldDeclaration
+from .interface import InputFieldDeclaration, OutputFieldDeclaration
 
 class ActionBase(ABC):
     """Base class for actions within the Weboter role framework."""

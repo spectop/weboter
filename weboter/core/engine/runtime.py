@@ -83,9 +83,13 @@ class Runtime:
         self.__load_environment()
         self.current_node_id: str | None = None
     
+    def finished(self) -> bool:
+        return self.current_node_id == '__end__'
+    
     def init_with_flow(self, flow: Flow):
         self.flow = flow
         self.nodes = {node.node_id: node for node in flow.nodes}
+        self.current_node_id = flow.start_node_id if flow.start_node_id else None
 
     def get_value(self, key: str):
         return self.data_context.get_data(key)
@@ -97,6 +101,11 @@ class Runtime:
         if node_id not in self.nodes:
             raise KeyError(f"节点ID未找到: {node_id}")
         self.current_node_id = node_id
+    
+    def get_node(self, node_id: str) -> Node:
+        if node_id not in self.nodes:
+            raise KeyError(f"节点ID未找到: {node_id}")
+        return self.nodes[node_id]
 
     def __load_environment(self):
         # 加载环境变量到数据上下文

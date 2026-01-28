@@ -17,7 +17,9 @@ class WorkflowReader:
 
             nodes = [
                 Node(
-                    id=node['id'],
+                    node_id=node['id'],
+                    name=node.get('name', ''),
+                    description=node.get('description', ''),
                     action=node['action'],
                     inputs=node.get('inputs', {}),
                     control=node.get('control', ''),
@@ -25,7 +27,11 @@ class WorkflowReader:
                 ) for node in data['nodes']
             ]
 
-            return Flow(name=data['name'], nodes=nodes)
+            return Flow(flow_id=data['id'],
+                        name=data['name'],
+                        description=data.get('description', ''),
+                        start_node_id=data.get('start_node_id'),
+                        nodes=nodes)
 
         except FileNotFoundError:
             raise WorkflowIOError(f"文件未找到: {file_path}")
@@ -39,10 +45,13 @@ class WorkflowWriter:
     def to_json(workflow: Flow, file_path: Path, indent: int = 2):
         """将工作流数据写入JSON文件"""
         data = {
+            "id": workflow.flow_id,
             "name": workflow.name,
+            "description": workflow.description,
+            "start_node_id": workflow.start_node_id,
             "nodes": [
                 {
-                    "id": node.id,
+                    "id": node.node_id,
                     "action": node.action,
                     "inputs": node.inputs,  # 使用'inputs'键保持兼容
                     "control": node.control,

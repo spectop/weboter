@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class InputFieldDeclaration:
@@ -6,7 +6,7 @@ class InputFieldDeclaration:
     name: str
     description: str = "Input field"
     required: bool = True # Is this field must be provided
-    accepted_types: list[str] = [] # List of accepted data types
+    accepted_types: list = field(default_factory=lambda: ["str"]) # Accepted data types
     default: any = None # Default value if not provided
 
 @dataclass

@@ -19,10 +19,10 @@ class NextNode(ControlBase):
     )
 
     async def calc_next(self, context: dict) -> str:
-        input = context.get("input", {})
-        next_node = input.get("next_node")
+        params = context.get("params", {})
+        next_node = params.get("next_node")
         if not next_node:
-            raise ValueError("Input 'next_node' is required.")
+            raise ValueError("Params 'next_node' is required.")
 
         context["output"] = next_node
         return next_node

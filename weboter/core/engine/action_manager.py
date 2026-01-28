@@ -78,7 +78,20 @@ class ActionManager:
         self._packages[name] = package
         return True
     
-    def get_action(self, package_name: str, action_name: str) -> ActionBase | None:
+    def get_action(self, full_name: str) -> ActionBase | None:
+        """
+        获取指定的动作实例
+        full_action_name 格式: "package.ActionClass"
+        如果 package 为空，则使用内置包
+        """
+        if '.' in full_name:
+            package_name, action_name = full_name.split('.', 1)
+        else:
+            package_name = ""
+            action_name = full_name
+        return self.__get_action(package_name, action_name)
+    
+    def __get_action(self, package_name: str, action_name: str) -> ActionBase | None:
         # if package_name is empty, use builtin package
         if not package_name:
             package_name = "builtin"

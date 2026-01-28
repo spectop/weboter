@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from interface import InputFieldDeclaration, OutputFieldDeclaration
+from .interface import InputFieldDeclaration, OutputFieldDeclaration
 
 class ControlBase(ABC):
     name: str = "BaseControl"

@@ -1,5 +1,53 @@
 from weboter.public.contracts import *
 import playwright.async_api as pw
+# async_playwright, Browser, Page
+class OpenBrowser(ActionBase):
+    """Action to open a web browser instance."""
+    name: str = "OpenBrowser"
+    description: str = "Open a web browser instance"
+    inputs: list[InputFieldDeclaration] = [
+        InputFieldDeclaration(
+            name="browser_type",
+            description="Type of the browser to open (chromium, firefox, webkit)",
+            required=False,
+            accepted_types=["string"],
+            default="chromium"
+        ),
+        InputFieldDeclaration(
+            name="headless",
+            description="Whether to run browser in headless mode",
+            required=False,
+            accepted_types=["boolean"],
+            default=True
+        )
+    ]
+    outputs: list[OutputFieldDeclaration] = [
+        OutputFieldDeclaration(
+            name="browser",
+            description="The opened browser instance",
+            type="Browser"
+        )
+    ]
+
+    async def execute(self, context: dict):
+        inputs = context.get("inputs", {})
+        browser_type = inputs.get("browser_type")
+        headless = inputs.get("headless", True)
+
+        pw_instance = await pw.async_playwright().start()
+
+        if browser_type == "chromium":
+            browser = await pw_instance.chromium.launch(headless=headless)
+        elif browser_type == "firefox":
+            browser = await pw_instance.firefox.launch(headless=headless)
+        elif browser_type == "webkit":
+            browser = await pw_instance.webkit.launch(headless=headless)
+        else:
+            raise ValueError(f"Unsupported browser type: {browser_type}")
+        
+        context["browser"] = browser
+        context["pw_inst"] = pw_instance
+        context["output"] = {"browser": browser}
 
 class OpenPage(ActionBase):
     """Action to open a web page given a URL."""
@@ -22,8 +70,8 @@ class OpenPage(ActionBase):
     ]
 
     async def execute(self, context: dict):
-        input = context.get("input", {})
-        url = input.get("url")
+        inputs = context.get("inputs", {})
+        url = inputs.get("url")
         if not url:
             raise ValueError("Input 'url' is required.")
 
@@ -37,7 +85,11 @@ class OpenPage(ActionBase):
         await page.goto(url)
         
         output = {}
-        output["page"] = page
+        if not output.get("pages"):
+            output["pages"] = []
+        if not isinstance(output["pages"], list):
+            raise ValueError("Output 'pages' must be a list.")
+        output["pages"].append(page)
         context["output"] = output
         context["current_page"] = page
 
@@ -63,8 +115,8 @@ class ClickItem(ActionBase):
     outputs: list[OutputFieldDeclaration] = []
 
     async def execute(self, context: dict):
-        input = context.get("input", {})
-        selector = input.get("selector")
+        inputs = context.get("inputs", {})
+        selector = inputs.get("selector")
         if not selector:
             raise ValueError("Input 'selector' is required.")
 
@@ -74,7 +126,7 @@ class ClickItem(ActionBase):
         if not isinstance(page, pw.Page):
             raise ValueError("Current page in context is not a valid Page object.")
         
-        timeout = input.get("timeout", 5000)
+        timeout = inputs.get("timeout", 5000)
         if not isinstance(timeout, (int, float)):
             timeout = 5000
         

@@ -4,6 +4,7 @@ from . import basic_control
 package_name = "builtin"
 
 actions = [
+    basic_action.OpenBrowser,
     basic_action.OpenPage,
     basic_action.ClickItem,
 ]

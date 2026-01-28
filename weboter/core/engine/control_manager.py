@@ -74,7 +74,17 @@ class ControlManager:
         self._packages[name] = package
         return True
     
-    def get_control(self, package_name: str, control_name: str) -> ControlBase | None:
+    def get_control(self, full_name: str) -> ControlBase | None:
+        """根据全名获取控制器实例，格式: "package.ControlClass" """
+        if '.' not in full_name:
+            return None
+        parts = full_name.split('.')
+        if len(parts) != 2:
+            return None
+        package_name, control_name = parts
+        return self.__get_control(package_name, control_name)
+    
+    def __get_control(self, package_name: str, control_name: str) -> ControlBase | None:
         package = self._packages.get(package_name, None)
         if not package:
             return None
