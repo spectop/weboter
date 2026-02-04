@@ -1,7 +1,8 @@
 from weboter.public.model import Flow, Node
-from .runtime import Runtime
+from .runtime import Runtime, DataContext
 from .action_manager import action_manager
 from .control_manager import control_manager
+from .io_pipe_impl import IOPipeImpl
 from weboter.public.contracts import *
 
 class Scheduler:
@@ -21,6 +22,9 @@ class Scheduler:
         inputs = {}
         # add static inputs
         for key, value in node.inputs.items():
+            # resolve from runtime if it's a variable
+            if isinstance(value, str) and DataContext.contains_var(value):
+                value = self.runtime.get_value(value)
             inputs[key] = value
         self.__ctx__['inputs'] = inputs
 
@@ -30,18 +34,19 @@ class Scheduler:
             raise ValueError(f"Action '{action_name}' not found")
         await action.execute(self.__ctx__)
 
-    def prepare_params(self, node: Node):
-        params = {}
+    def prepare_control_io(self, node: Node) -> IOPipeImpl:
+        inst = IOPipeImpl()
+        inst.set_runtime(self.runtime)
         # add static params
         for key, value in node.params.items():
-            params[key] = value
-        self.__ctx__['params'] = params
+            inst.params[key] = value
+        return inst
 
-    async def exec_control(self, control_name: str):
+    async def exec_control(self, control_name: str, io: IOPipeImpl) -> str:
         control : ControlBase = self.control_manager.get_control(control_name)
         if not control:
             raise ValueError(f"Control '{control_name}' not found")
-        next_node_id = await control.calc_next(self.__ctx__)
+        next_node_id = await control.calc_next(io)
         return next_node_id
     
     async def step_one(self):
@@ -61,8 +66,8 @@ class Scheduler:
             self.prepare_inputs(node)
             await self.exec_action(node.action)
         
-        self.prepare_params(node)
-        next_node_id = await self.exec_control(node.control)
+        control_io = self.prepare_control_io(node)
+        next_node_id = await self.exec_control(node.control, control_io)
         self.runtime.set_current_node(next_node_id)
     
     async def run(self):

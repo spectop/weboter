@@ -255,3 +255,117 @@ class FillInput(ActionBase):
             raise ValueError(f"Unsupported locator type: {locator_type}")
 
         await element.fill(text, timeout=timeout)
+
+class WaitElement(ActionBase):
+    """Action to wait for an element to appear on the web page given a locator."""
+    name: str = "WaitElement"
+    description: str = "Wait for an element on the web page by locator"
+    inputs: list[InputFieldDeclaration] = [
+        InputFieldDeclaration(
+            name="locator",
+            description="The CSS locator of the element to wait for",
+            required=True,
+            accepted_types=["string"]
+        ),
+        InputFieldDeclaration(
+            name="locator_type",
+            description="Type of the locator (role, text, label, placeholder, alt, title, testid, css, xpath)",
+            required=False,
+            accepted_types=["string"],
+            default="text"
+        ),
+        InputFieldDeclaration(
+            name="locator_ext",
+            description="Additional locator information (if needed)",
+            required=False,
+            accepted_types=["dict"],
+            default={}
+        ),
+        InputFieldDeclaration(
+            name="timeout",
+            description="Maximum time to wait for the selector (in milliseconds)",
+            required=False,
+            accepted_types=["integer"],
+            default=5000
+        )
+    ]
+    outputs: list[OutputFieldDeclaration] = [
+        OutputFieldDeclaration(
+            name="element_found",
+            description="Whether the element was found within the timeout",
+            type="boolean"
+        )
+    ]
+
+    async def execute(self, context: dict):
+        inputs = context.get("inputs", {})
+        locator = inputs.get("locator")
+        if not locator:
+            raise ValueError("Input 'locator' is required.")
+
+        page = context.get("current_page")
+        if not page:
+            raise ValueError("Current page is required in context.")
+        if not isinstance(page, pw.Page):
+            raise ValueError("Current page in context is not a valid Page object.")
+        
+        timeout = inputs.get("timeout", 5000)
+        if not isinstance(timeout, (int, float)):
+            timeout = 5000
+
+        locator_ext = inputs.get("locator_ext", {})
+
+        locator_type = inputs.get("locator_type", "text")
+        if locator_type == "role":
+            element = page.get_by_role(locator, **locator_ext)
+        elif locator_type == "text":
+            element = page.get_by_text(locator, **locator_ext)
+        elif locator_type == "label":
+            element = page.get_by_label(locator, **locator_ext)
+        elif locator_type == "placeholder":
+            element = page.get_by_placeholder(locator, **locator_ext)
+        elif locator_type == "alt":
+            element = page.get_by_alt_text(locator, **locator_ext)
+        elif locator_type == "title":
+            element = page.get_by_title(locator, **locator_ext)
+        elif locator_type == "testid":
+            element = page.get_by_test_id(locator, **locator_ext)
+        elif locator_type == "css":
+            element = page.locator(locator, **locator_ext)
+        elif locator_type == "xpath":
+            element = page.locator(f"xpath={locator}", **locator_ext)
+        else:
+            raise ValueError(f"Unsupported locator type: {locator_type}")
+        
+        try:
+            await element.wait_for(state="visible", timeout=timeout)
+            found = True
+        except pw.TimeoutError:
+            found = False
+        context["output"] = {"element_found": found}
+
+class SleepFor(ActionBase):
+    """Action to pause execution for a specified duration."""
+    name: str = "SleepFor"
+    description: str = "Pause execution for a specified duration in seconds"
+    inputs: list[InputFieldDeclaration] = [
+        InputFieldDeclaration(
+            name="duration",
+            description="Duration to sleep in seconds",
+            required=True,
+            accepted_types=["number"],
+            default=3
+        )
+    ]
+    outputs: list[OutputFieldDeclaration] = []
+
+    async def execute(self, context: dict):
+        import asyncio
+        inputs = context.get("inputs", {})
+        duration = inputs.get("duration")
+        if duration is None:
+            raise ValueError("Input 'duration' is required.")
+        if not isinstance(duration, (int, float)):
+            raise ValueError("Input 'duration' must be a number.")
+        
+        await asyncio.sleep(duration)

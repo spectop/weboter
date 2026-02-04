@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from .interface import InputFieldDeclaration, OutputFieldDeclaration
+from .io_pipe import IOPipe
 
 class ControlBase(ABC):
     name: str = "BaseControl"
@@ -11,7 +12,7 @@ class ControlBase(ABC):
         self.name = name
 
     @abstractmethod
-    async def calc_next(self, context: dict) -> str:
+    async def calc_next(self, io: IOPipe) -> str:
         """
         Determine the next node in the workflow based on the given context.
         User defined controls must override this method.
