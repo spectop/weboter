@@ -14,6 +14,7 @@ actions = [
     basic_action.SleepFor,
     # captcha
     captcha_action.SimpleSlideCaptcha,
+    captcha_action.SimpleSlideNCC,
 ]
 
 controls = [
