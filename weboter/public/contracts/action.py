@@ -10,6 +10,7 @@ Action should explicitly declare it's inputs and outputs, engine will create and
 
 from abc import ABC, abstractmethod
 from .interface import InputFieldDeclaration, OutputFieldDeclaration
+from .io_pipe import IOPipe
 
 class ActionBase(ABC):
     """Base class for actions within the Weboter role framework."""
@@ -22,7 +23,7 @@ class ActionBase(ABC):
         self.name = name
 
     @abstractmethod
-    async def execute(self, context: dict):
+    async def execute(self, io: IOPipe):
         """
         Execute the action with the given input and output.
         User defined actions must override this method.

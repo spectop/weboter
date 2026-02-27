@@ -29,8 +29,8 @@ class OpenBrowser(ActionBase):
         )
     ]
 
-    async def execute(self, context: dict):
-        inputs = context.get("inputs", {})
+    async def execute(self, io: IOPipe):
+        inputs = io.inputs
         browser_type = inputs.get("browser_type")
         headless = inputs.get("headless", True)
 
@@ -45,9 +45,8 @@ class OpenBrowser(ActionBase):
         else:
             raise ValueError(f"Unsupported browser type: {browser_type}")
         
-        context["browser"] = browser
-        context["pw_inst"] = pw_instance
-        context["output"] = {"browser": browser}
+        io.outputs['__pw_inst__'] = pw_instance
+        io.outputs['__browser__'] = browser
 
 class OpenPage(ActionBase):
     """Action to open a web page given a URL."""
@@ -69,29 +68,27 @@ class OpenPage(ActionBase):
         )
     ]
 
-    async def execute(self, context: dict):
-        inputs = context.get("inputs", {})
+    async def execute(self, io: IOPipe):
+        inputs = io.inputs
         url = inputs.get("url")
         if not url:
             raise ValueError("Input 'url' is required.")
 
-        browser = context.get("browser")
-        if not browser:
+        if not io.browser:
             raise ValueError("Browser instance is required in context.")
-        if not isinstance(browser, pw.Browser):
+        if not isinstance(io.browser, pw.Browser):
             raise ValueError("Browser in context is not a valid Browser object.")
         
-        page = await browser.new_page()
+        page = await io.browser.new_page()
         await page.goto(url)
         
-        output = {}
+        output = io.outputs
         if not output.get("pages"):
             output["pages"] = []
         if not isinstance(output["pages"], list):
             raise ValueError("Output 'pages' must be a list.")
-        output["pages"].append(page)
-        context["output"] = output
-        context["current_page"] = page
+        
+        io.outputs['__page__'] = page
 
 class ClickItem(ActionBase):
     """Action to click an item on the web page given a locator."""
@@ -128,13 +125,13 @@ class ClickItem(ActionBase):
     ]
     outputs: list[OutputFieldDeclaration] = []
 
-    async def execute(self, context: dict):
-        inputs = context.get("inputs", {})
+    async def execute(self, io: IOPipe):
+        inputs = io.inputs
         locator = inputs.get("locator")
         if not locator:
             raise ValueError("Input 'locator' is required.")
 
-        page = context.get("current_page")
+        page = io.page
         if not page:
             raise ValueError("Current page is required in context.")
         if not isinstance(page, pw.Page):
@@ -211,8 +208,8 @@ class FillInput(ActionBase):
     ]
     outputs: list[OutputFieldDeclaration] = []
 
-    async def execute(self, context: dict):
-        inputs = context.get("inputs", {})
+    async def execute(self, io: IOPipe):
+        inputs = io.inputs
         locator = inputs.get("locator")
         if not locator:
             raise ValueError("Input 'locator' is required.")
@@ -220,7 +217,7 @@ class FillInput(ActionBase):
         if text is None:
             raise ValueError("Input 'text' is required.")
 
-        page = context.get("current_page")
+        page = io.page
         if not page:
             raise ValueError("Current page is required in context.")
         if not isinstance(page, pw.Page):
@@ -297,13 +294,13 @@ class WaitElement(ActionBase):
         )
     ]
 
-    async def execute(self, context: dict):
-        inputs = context.get("inputs", {})
+    async def execute(self, io: IOPipe):
+        inputs = io.inputs
         locator = inputs.get("locator")
         if not locator:
             raise ValueError("Input 'locator' is required.")
 
-        page = context.get("current_page")
+        page = io.page
         if not page:
             raise ValueError("Current page is required in context.")
         if not isinstance(page, pw.Page):
@@ -342,7 +339,7 @@ class WaitElement(ActionBase):
             found = True
         except pw.TimeoutError:
             found = False
-        context["output"] = {"element_found": found}
+        io.outputs = {"element_found": found}
 
 class SleepFor(ActionBase):
     """Action to pause execution for a specified duration."""
@@ -359,9 +356,9 @@ class SleepFor(ActionBase):
     ]
     outputs: list[OutputFieldDeclaration] = []
 
-    async def execute(self, context: dict):
+    async def execute(self, io: IOPipe):
         import asyncio
-        inputs = context.get("inputs", {})
+        inputs = io.inputs
         duration = inputs.get("duration")
         if duration is None:
             raise ValueError("Input 'duration' is required.")

@@ -152,8 +152,8 @@ class SimpleSlideCaptcha(ActionBase):
     ]
     outputs: list[OutputFieldDeclaration] = []
 
-    async def execute(self, context: dict):
-        inputs = context.get("inputs", {})
+    async def execute(self, io: IOPipe):
+        inputs = io.inputs
 
         if "image" not in inputs or "slider" not in inputs or "bar" not in inputs or "retry" not in inputs:
             raise ValueError("Missing required input locators: 'image', 'slider', 'bar', or 'retry'.")
@@ -169,7 +169,7 @@ class SimpleSlideCaptcha(ActionBase):
         suggest_w = inputs.get("suggest_w", 0)
         suggest_h = inputs.get("suggest_h", 0)
 
-        page = context.get("current_page")
+        page = io.page
         if page is None:
             raise ValueError("No current page found in context.")
         if not isinstance(page, pw.Page):
@@ -298,8 +298,8 @@ class SimpleSlideNCC(ActionBase):
     ]
     outputs: list[OutputFieldDeclaration] = []
 
-    async def execute(self, context: dict):
-        inputs = context.get("inputs", {})
+    async def execute(self, io: IOPipe):
+        inputs = io.inputs
         if "whole_image" not in inputs or "piece_image" not in inputs or "slider" not in inputs or "bar" not in inputs or "retry" not in inputs:
             raise ValueError("Missing required input locators: 'whole_image', 'piece_image', 'slider', 'bar', or 'retry'.")
         
@@ -312,7 +312,7 @@ class SimpleSlideNCC(ActionBase):
         fix_k = inputs.get("fix_k", 1.0)
         fix_b = inputs.get("fix_b", 0.0)
 
-        page = context.get("current_page")
+        page = io.page
         if page is None:
             raise ValueError("No current page found in context.")
         if not isinstance(page, pw.Page):

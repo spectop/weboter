@@ -11,6 +11,9 @@ class IOPipe(ABC):
         self._inputs = {}
         self._outputs = {}
         self._params = {}
+        self._pw_inst : pw.Playwright = None
+        self._browser : pw.Browser = None
+        self._page : pw.Page = None
 
     @property
     def inputs(self) -> dict:
@@ -23,6 +26,30 @@ class IOPipe(ABC):
     @outputs.setter
     def outputs(self, value):
         self._outputs = value
+
+    @property
+    def pw_inst(self) -> pw.Playwright:
+        return self._pw_inst
+
+    @pw_inst.setter
+    def pw_inst(self, value: pw.Playwright):
+        self._pw_inst = value
+
+    @property
+    def browser(self) -> pw.Browser:
+        return self._browser
+    
+    @browser.setter
+    def browser(self, value: pw.Browser):
+        self._browser = value
+
+    @property
+    def page(self) -> pw.Page:
+        return self._page
+    
+    @page.setter
+    def page(self, value: pw.Page):
+        self._page = value
     
     @property
     def params(self) -> dict:
