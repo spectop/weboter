@@ -36,11 +36,11 @@ class IOPipe(ABC):
         self._pw_inst = value
 
     @property
-    def browser(self) -> pw.Browser:
+    def browser(self) -> pw.BrowserContext:
         return self._browser
     
     @browser.setter
-    def browser(self, value: pw.Browser):
+    def browser(self, value: pw.BrowserContext):
         self._browser = value
 
     @property

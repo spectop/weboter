@@ -23,9 +23,12 @@ class Scheduler:
         if pw_inst:
             self.__ctx__['pw_inst'] = pw_inst
         
+        # use browser_context and hide the original brower
         browser = io.outputs.get('__browser__', None)
-        if browser:
-            self.__ctx__['browser'] = browser
+        browser_context = io.outputs.get('__browser_context__', None)
+        if browser and browser_context:
+            self.__ctx__['browser'] = browser_context
+            self.__ctx__['__original_browser__'] = browser
         
         page = io.outputs.get('__page__', None)
         if page:

@@ -1,5 +1,6 @@
 from weboter.public.contracts import *
 import playwright.async_api as pw
+from playwright_stealth import Stealth
 # async_playwright, Browser, Page
 class OpenBrowser(ActionBase):
     """Action to open a web browser instance."""
@@ -45,8 +46,13 @@ class OpenBrowser(ActionBase):
         else:
             raise ValueError(f"Unsupported browser type: {browser_type}")
         
+        browser_context = await browser.new_context()
+        stealth = Stealth()
+        await stealth.apply_stealth_async(browser_context)
+        
         io.outputs['__pw_inst__'] = pw_instance
         io.outputs['__browser__'] = browser
+        io.outputs['__browser_context__'] = browser_context
 
 class OpenPage(ActionBase):
     """Action to open a web page given a URL."""
@@ -73,11 +79,10 @@ class OpenPage(ActionBase):
         url = inputs.get("url")
         if not url:
             raise ValueError("Input 'url' is required.")
-
         if not io.browser:
             raise ValueError("Browser instance is required in context.")
-        if not isinstance(io.browser, pw.Browser):
-            raise ValueError("Browser in context is not a valid Browser object.")
+        if not isinstance(io.browser, pw.BrowserContext):
+            raise ValueError("Browser in context is not a valid BrowserContext object.")
         
         page = await io.browser.new_page()
         await page.goto(url)
