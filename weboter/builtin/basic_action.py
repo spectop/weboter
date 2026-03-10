@@ -104,21 +104,7 @@ class ClickItem(ActionBase):
             name="locator",
             description="The CSS locator of the item to click",
             required=True,
-            accepted_types=["string"]
-        ),
-        InputFieldDeclaration(
-            name="locator_type",
-            description="Type of the locator (role, text, label, placeholder, alt, title, testid, css, xpath)",
-            required=False,
-            accepted_types=["string"],
-            default="text"
-        ),
-        InputFieldDeclaration(
-            name="locator_ext",
-            description="Additional locator information (if needed)",
-            required=False,
-            accepted_types=["dict"],
-            default={}
+            accepted_types=["LocatorDefine"]
         ),
         InputFieldDeclaration(
             name="timeout",
@@ -132,10 +118,10 @@ class ClickItem(ActionBase):
 
     async def execute(self, io: IOPipe):
         inputs = io.inputs
-        locator = inputs.get("locator")
-        if not locator:
-            raise ValueError("Input 'locator' is required.")
 
+        if "locator" not in inputs:
+            raise ValueError("Input 'locator' is required.")
+        
         page = io.page
         if not page:
             raise ValueError("Current page is required in context.")
@@ -146,30 +132,9 @@ class ClickItem(ActionBase):
         if not isinstance(timeout, (int, float)):
             timeout = 5000
 
-        locator_ext = inputs.get("locator_ext", {})
+        locator = LocatorDefine.from_dict(inputs["locator"])
+        element = utils.get_locator(page, locator)
 
-        locator_type = inputs.get("locator_type", "text")
-        if locator_type == "role":
-            element = page.get_by_role(locator, **locator_ext)
-        elif locator_type == "text":
-            element = page.get_by_text(locator, **locator_ext)
-        elif locator_type == "label":
-            element = page.get_by_label(locator, **locator_ext)
-        elif locator_type == "placeholder":
-            element = page.get_by_placeholder(locator, **locator_ext)
-        elif locator_type == "alt":
-            element = page.get_by_alt_text(locator, **locator_ext)
-        elif locator_type == "title":
-            element = page.get_by_title(locator, **locator_ext)
-        elif locator_type == "testid":
-            element = page.get_by_test_id(locator, **locator_ext)
-        elif locator_type == "css":
-            element = page.locator(locator, **locator_ext)
-        elif locator_type == "xpath":
-            element = page.locator(f"xpath={locator}", **locator_ext)
-        else:
-            raise ValueError(f"Unsupported locator type: {locator_type}")
-        
         await element.click(timeout=timeout)
 
 class FillInput(ActionBase):
@@ -181,21 +146,7 @@ class FillInput(ActionBase):
             name="locator",
             description="The CSS locator of the input field to fill",
             required=True,
-            accepted_types=["string"]
-        ),
-        InputFieldDeclaration(
-            name="locator_type",
-            description="Type of the locator (role, text, label, placeholder, alt, title, testid, css, xpath)",
-            required=False,
-            accepted_types=["string"],
-            default="text"
-        ),
-        InputFieldDeclaration(
-            name="locator_ext",
-            description="Additional locator information (if needed)",
-            required=False,
-            accepted_types=["dict"],
-            default={}
+            accepted_types=["LocatorDefine"]
         ),
         InputFieldDeclaration(
             name="text",
@@ -215,12 +166,9 @@ class FillInput(ActionBase):
 
     async def execute(self, io: IOPipe):
         inputs = io.inputs
-        locator = inputs.get("locator")
-        if not locator:
-            raise ValueError("Input 'locator' is required.")
-        text = inputs.get("text")
-        if text is None:
-            raise ValueError("Input 'text' is required.")
+
+        if "locator" not in inputs or "text" not in inputs:
+            raise ValueError("Input 'locator' and 'text' are required.")
 
         page = io.page
         if not page:
@@ -232,30 +180,9 @@ class FillInput(ActionBase):
         if not isinstance(timeout, (int, float)):
             timeout = 5000
 
-        locator_ext = inputs.get("locator_ext", {})
-
-        locator_type = inputs.get("locator_type", "text")
-        if locator_type == "role":
-            element = page.get_by_role(locator, **locator_ext)
-        elif locator_type == "text":
-            element = page.get_by_text(locator, **locator_ext)
-        elif locator_type == "label":
-            element = page.get_by_label(locator, **locator_ext)
-        elif locator_type == "placeholder":
-            element = page.get_by_placeholder(locator, **locator_ext)
-        elif locator_type == "alt":
-            element = page.get_by_alt_text(locator, **locator_ext)
-        elif locator_type == "title":
-            element = page.get_by_title(locator, **locator_ext)
-        elif locator_type == "testid":
-            element = page.get_by_test_id(locator, **locator_ext)
-        elif locator_type == "css":
-            element = page.locator(locator, **locator_ext)
-        elif locator_type == "xpath":
-            element = page.locator(f"xpath={locator}", **locator_ext)
-        else:
-            raise ValueError(f"Unsupported locator type: {locator_type}")
-
+        locator = LocatorDefine.from_dict(inputs["locator"])
+        text = inputs["text"]
+        element = utils.get_locator(page, locator)
         await element.fill(text, timeout=timeout)
 
 class WaitElement(ActionBase):
@@ -267,21 +194,7 @@ class WaitElement(ActionBase):
             name="locator",
             description="The CSS locator of the element to wait for",
             required=True,
-            accepted_types=["string"]
-        ),
-        InputFieldDeclaration(
-            name="locator_type",
-            description="Type of the locator (role, text, label, placeholder, alt, title, testid, css, xpath)",
-            required=False,
-            accepted_types=["string"],
-            default="text"
-        ),
-        InputFieldDeclaration(
-            name="locator_ext",
-            description="Additional locator information (if needed)",
-            required=False,
-            accepted_types=["dict"],
-            default={}
+            accepted_types=["LocatorDefine"]
         ),
         InputFieldDeclaration(
             name="timeout",
@@ -301,8 +214,8 @@ class WaitElement(ActionBase):
 
     async def execute(self, io: IOPipe):
         inputs = io.inputs
-        locator = inputs.get("locator")
-        if not locator:
+
+        if "locator" not in inputs:
             raise ValueError("Input 'locator' is required.")
 
         page = io.page
@@ -315,36 +228,14 @@ class WaitElement(ActionBase):
         if not isinstance(timeout, (int, float)):
             timeout = 5000
 
-        locator_ext = inputs.get("locator_ext", {})
+        locator = LocatorDefine.from_dict(inputs.get("locator"))
+        element = utils.get_locator(page, locator)
 
-        locator_type = inputs.get("locator_type", "text")
-        if locator_type == "role":
-            element = page.get_by_role(locator, **locator_ext)
-        elif locator_type == "text":
-            element = page.get_by_text(locator, **locator_ext)
-        elif locator_type == "label":
-            element = page.get_by_label(locator, **locator_ext)
-        elif locator_type == "placeholder":
-            element = page.get_by_placeholder(locator, **locator_ext)
-        elif locator_type == "alt":
-            element = page.get_by_alt_text(locator, **locator_ext)
-        elif locator_type == "title":
-            element = page.get_by_title(locator, **locator_ext)
-        elif locator_type == "testid":
-            element = page.get_by_test_id(locator, **locator_ext)
-        elif locator_type == "css":
-            element = page.locator(locator, **locator_ext)
-        elif locator_type == "xpath":
-            element = page.locator(f"xpath={locator}", **locator_ext)
-        else:
-            raise ValueError(f"Unsupported locator type: {locator_type}")
-        
         try:
             await element.wait_for(state="visible", timeout=timeout)
-            found = True
+            io.outputs["element_found"] = True
         except pw.TimeoutError:
-            found = False
-        io.outputs = {"element_found": found}
+            io.outputs["element_found"] = False
 
 class SleepFor(ActionBase):
     """Action to pause execution for a specified duration."""
@@ -371,3 +262,94 @@ class SleepFor(ActionBase):
             raise ValueError("Input 'duration' must be a number.")
         
         await asyncio.sleep(duration)
+
+class EmptyAction(ActionBase):
+    """A no-op action that does nothing."""
+    name: str = "EmptyAction"
+    description: str = "An action that does nothing"
+    inputs: list[InputFieldDeclaration] = [
+        InputFieldDeclaration(
+            name="message",
+            description="An optional message to log",
+            required=False,
+            accepted_types=["string"],
+            default=""
+        )
+    ]
+    outputs: list[OutputFieldDeclaration] = []
+
+    async def execute(self, io: IOPipe):
+        message = io.inputs.get("message", "")
+        if message:
+            print(f"EmptyAction: {message}")
+
+class ExtraData(ActionBase):
+    """Action to get data from the web page using a locator."""
+    name: str = "ExtraData"
+    description: str = "Get data from the web page using a locator"
+    inputs: list[InputFieldDeclaration] = [
+        InputFieldDeclaration(
+            name="locator",
+            description="The locator of the element to get data from",
+            required=True,
+            accepted_types=["LocatorDefine"]
+        ),
+        InputFieldDeclaration(
+            name="data_source",
+            description="The type of data to extract (text, html, attr)",
+            required=False,
+            accepted_types=["string"],
+            default="text"
+        ),
+        InputFieldDeclaration(
+            name="timeout",
+            description="Maximum time to wait for the selector (in milliseconds)",
+            required=False,
+            accepted_types=["integer"],
+            default=5000
+        )
+    ]
+    outputs: list[OutputFieldDeclaration] = [
+        OutputFieldDeclaration(
+            name="data",
+            description="The extracted data from the located element",
+            type="string"
+        )
+    ]
+
+    async def execute(self, io: IOPipe):
+        inputs = io.inputs
+        
+        if not inputs.get("locator"):
+            raise ValueError("Input 'locator' is required.")
+        locator = LocatorDefine.from_dict(inputs["locator"])
+
+        page = io.page
+        if not page:
+            raise ValueError("Current page is required in context.")
+        if not isinstance(page, pw.Page):
+            raise ValueError("Current page in context is not a valid Page object.")
+        
+        timeout = inputs.get("timeout", 5000)
+        if not isinstance(timeout, (int, float)):
+            timeout = 5000
+        data_source = inputs.get("data_source", "text")
+        
+
+        element = utils.get_locator(page, locator)
+        await element.wait_for(state="visible", timeout=timeout)
+        
+        if data_source == "text":
+            data = await element.inner_text()
+        elif data_source == "html":
+            data = await element.inner_html()
+        elif data_source.startswith("attr:"):
+            attr_name = data_source.split(":", 1)[1]
+            data = await element.get_attribute(attr_name)
+        else:
+            raise ValueError(f"Unsupported data source type: {data_source}")
+        
+        # for testing
+        print(f"Extracted data: {data}")
+
+        io.outputs["data"] = data

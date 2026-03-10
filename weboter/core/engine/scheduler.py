@@ -37,16 +37,9 @@ class Scheduler:
             if page not in pages:
                 pages.append(page)
                 self.__ctx__['pages'] = pages
-
-    def prepare_inputs(self, node: Node):
-        inputs = {}
-        # add static inputs
-        for key, value in node.inputs.items():
-            # resolve from runtime if it's a variable
-            if isinstance(value, str) and DataContext.contains_var(value):
-                value = self.runtime.get_value(value)
-            inputs[key] = value
-        self.__ctx__['inputs'] = inputs
+        
+        # add outputs and prev_outputs
+        self.runtime.store_outputs(io.outputs)
     
     def prepare_action_io(self, node: Node) -> IOPipeImpl:
         inst = IOPipeImpl()
@@ -74,6 +67,8 @@ class Scheduler:
         inst.set_runtime(self.runtime)
         # add static params
         for key, value in node.params.items():
+            if isinstance(value, str) and DataContext.contains_var(value):
+                value = self.runtime.get_value(value)
             inst.params[key] = value
         return inst
 
@@ -105,6 +100,7 @@ class Scheduler:
         control_io = self.prepare_control_io(node)
         next_node_id = await self.exec_control(node.control, control_io)
         self.runtime.set_current_node(next_node_id)
+        self.runtime.switch_outputs()
     
     async def run(self):
         if not self.workflow:

@@ -294,6 +294,20 @@ class SimpleSlideNCC(ActionBase):
             required=False,
             accepted_types=["number"],
             default=0.0
+        ),
+        InputFieldDeclaration(
+            name="check_wait",
+            description="The wait time in seconds after sliding to check if the captcha is solved.",
+            required=False,
+            accepted_types=["number"],
+            default=5.0
+        ),
+        InputFieldDeclaration(
+            name="retry_wait",
+            description="The wait time in seconds before retrying after a failed attempt.",
+            required=False,
+            accepted_types=["number"],
+            default=5.0
         )
     ]
     outputs: list[OutputFieldDeclaration] = []
@@ -311,6 +325,8 @@ class SimpleSlideNCC(ActionBase):
 
         fix_k = inputs.get("fix_k", 1.0)
         fix_b = inputs.get("fix_b", 0.0)
+        check_wait = inputs.get("check_wait", 5.0)
+        retry_wait = inputs.get("retry_wait", 5.0)
 
         page = io.page
         if page is None:
@@ -343,7 +359,7 @@ class SimpleSlideNCC(ActionBase):
             left_tries -= 1
             
             # 检查 piece_image_element 是否还存在，存在则表示失败
-            await asyncio.sleep(2)
+            await asyncio.sleep(check_wait)
             exists = await piece_image_element.is_visible()
             if not exists:
                 print("Slide captcha solved successfully.")
@@ -351,7 +367,7 @@ class SimpleSlideNCC(ActionBase):
             
             print("Slide captcha attempt failed, retrying...")
             await retry_element.click()
-            await asyncio.sleep(5)
+            await asyncio.sleep(retry_wait)
 
     async def fetch_image(self, element: pw.Locator, retry_count: int = 5) -> cv2.Mat:
         image_b64 = await element.evaluate("(el) => el.toDataURL('image/png').split(',')[1]")

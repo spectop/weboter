@@ -74,6 +74,19 @@ class DataContext:
             current = current[part]
         current[parts[-1]] = value
 
+    def store_outputs(self, outputs: dict):
+        """
+        存储当前节点的输出到数据上下文中，供后续节点使用
+        """
+        self.data['cur_outputs'] = outputs
+    
+    def switch_outputs(self):
+        """
+        切换节点时调用，将当前输出切换到前一个输出，并清空当前输出
+        """
+        self.data['prev_outputs'] = self.data['cur_outputs']
+        self.data['cur_outputs'] = {}
+
 class Runtime:
     
     def __init__(self):
@@ -96,6 +109,12 @@ class Runtime:
     
     def set_value(self, key: str, value):
         self.data_context.set_data(key, value)
+    
+    def store_outputs(self, outputs: dict):
+        self.data_context.store_outputs(outputs)
+
+    def switch_outputs(self):
+        self.data_context.switch_outputs()
 
     def set_current_node(self, node_id: str):
         if node_id not in self.nodes:
