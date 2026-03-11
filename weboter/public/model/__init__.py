@@ -6,6 +6,6 @@ Defines core data structures for workflow representation:
 - DataContext: Runtime execution state
 """
 
-from .model import Node, Flow
+from .model import Node, Flow, NodeOutputConfig
 
-__all__ = ["Node", "Flow"]
+__all__ = ["Node", "Flow", "NodeOutputConfig"]

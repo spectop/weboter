@@ -74,11 +74,43 @@ class DataContext:
             current = current[part]
         current[parts[-1]] = value
 
-    def store_outputs(self, outputs: dict):
+    def store_outputs(self, outputs: dict, out_cfgs: list[NodeOutputConfig] | None = None):
         """
         存储当前节点的输出到数据上下文中，供后续节点使用
         """
         self.data['cur_outputs'] = outputs
+        if not out_cfgs:
+            return
+        # 用户声明了输出转储配置，根据配置将输出转储到指定位置
+        for cfg in out_cfgs:
+            if cfg.src not in outputs:
+                continue
+            value = outputs[cfg.src]
+            # 转换类型
+            if cfg.cvt:
+                try:
+                    if cfg.cvt == "int":
+                        value = int(value)
+                    elif cfg.cvt == "float":
+                        value = float(value)
+                    elif cfg.cvt == "str":
+                        value = str(value)
+                    elif cfg.cvt == "bool":
+                        value = bool(value)
+                    else:
+                        raise ValueError(f"Unsupported conversion type: {cfg.cvt}")
+                except Exception as e:
+                    raise ValueError(f"Failed to convert output '{cfg.src}' to type '{cfg.cvt}': {e}")
+            # 存储到指定位置
+            name = cfg.name if cfg.name else cfg.src
+            if cfg.pos == "flow":
+                # flow 表示存储到当前的工作流中，如果存在工作流嵌套，则只能在当前工作流内访问
+                self.set_data(f"$flow{{{name}}}", value)
+            elif cfg.pos == "global":
+                # global 表示存储到全局中，所有工作流都可以访问
+                self.set_data(f"$global{{{name}}}", value)
+            else:
+                raise ValueError(f"Unsupported output position: {cfg.pos}")
     
     def switch_outputs(self):
         """
@@ -110,8 +142,8 @@ class Runtime:
     def set_value(self, key: str, value):
         self.data_context.set_data(key, value)
     
-    def store_outputs(self, outputs: dict):
-        self.data_context.store_outputs(outputs)
+    def store_outputs(self, outputs: dict, out_cfgs: list[NodeOutputConfig] | None = None):
+        self.data_context.store_outputs(outputs, out_cfgs)
 
     def switch_outputs(self):
         self.data_context.switch_outputs()

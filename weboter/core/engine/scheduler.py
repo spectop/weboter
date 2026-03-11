@@ -39,7 +39,7 @@ class Scheduler:
                 self.__ctx__['pages'] = pages
         
         # add outputs and prev_outputs
-        self.runtime.store_outputs(io.outputs)
+        self.runtime.store_outputs(io.outputs, node.outputs)
     
     def prepare_action_io(self, node: Node) -> IOPipeImpl:
         inst = IOPipeImpl()

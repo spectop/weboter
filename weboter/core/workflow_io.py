@@ -1,8 +1,7 @@
 import json
 from pathlib import Path
 from typing import Optional
-from weboter.public.model import Node, Flow
-
+from weboter.public.model import Node, Flow, NodeOutputConfig
 class WorkflowIOError(Exception):
     """工作流读写操作异常基类"""
     pass
@@ -22,6 +21,7 @@ class WorkflowReader:
                     description=node.get('description', ''),
                     action=node['action'],
                     inputs=node.get('inputs', {}),
+                    outputs=[NodeOutputConfig(**output) for output in node.get('outputs', [])],
                     control=node.get('control', ''),
                     params=node.get('params', {})
                 ) for node in data['nodes']
@@ -54,6 +54,7 @@ class WorkflowWriter:
                     "id": node.node_id,
                     "action": node.action,
                     "inputs": node.inputs,  # 使用'inputs'键保持兼容
+                    "outputs": [output.__dict__ for output in node.outputs],  # 使用'outputs'键保持兼容
                     "control": node.control,
                     "params": node.params
                 } for node in workflow.nodes
