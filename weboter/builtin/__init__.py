@@ -12,6 +12,8 @@ actions = [
     basic_action.FillInput,
     basic_action.WaitElement,
     basic_action.SleepFor,
+    basic_action.EmptyAction,
+    basic_action.ExtractData,
     # captcha
     captcha_action.SimpleSlideCaptcha,
     captcha_action.SimpleSlideNCC,

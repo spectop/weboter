@@ -132,7 +132,7 @@ class ClickItem(ActionBase):
         if not isinstance(timeout, (int, float)):
             timeout = 5000
 
-        locator = LocatorDefine.from_dict(inputs["locator"])
+        locator = LocatorDefine.deserialize(inputs["locator"])
         element = utils.get_locator(page, locator)
 
         await element.click(timeout=timeout)
@@ -180,7 +180,7 @@ class FillInput(ActionBase):
         if not isinstance(timeout, (int, float)):
             timeout = 5000
 
-        locator = LocatorDefine.from_dict(inputs["locator"])
+        locator = LocatorDefine.deserialize(inputs["locator"])
         text = inputs["text"]
         element = utils.get_locator(page, locator)
         await element.fill(text, timeout=timeout)
@@ -228,7 +228,7 @@ class WaitElement(ActionBase):
         if not isinstance(timeout, (int, float)):
             timeout = 5000
 
-        locator = LocatorDefine.from_dict(inputs.get("locator"))
+        locator = LocatorDefine.deserialize(inputs.get("locator"))
         element = utils.get_locator(page, locator)
 
         try:
@@ -283,9 +283,9 @@ class EmptyAction(ActionBase):
         if message:
             print(f"EmptyAction: {message}")
 
-class ExtraData(ActionBase):
+class ExtractData(ActionBase):
     """Action to get data from the web page using a locator."""
-    name: str = "ExtraData"
+    name: str = "ExtractData"
     description: str = "Get data from the web page using a locator"
     inputs: list[InputFieldDeclaration] = [
         InputFieldDeclaration(
@@ -322,7 +322,7 @@ class ExtraData(ActionBase):
         
         if not inputs.get("locator"):
             raise ValueError("Input 'locator' is required.")
-        locator = LocatorDefine.from_dict(inputs["locator"])
+        locator = LocatorDefine.deserialize(inputs["locator"])
 
         page = io.page
         if not page:
