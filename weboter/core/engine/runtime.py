@@ -149,6 +149,9 @@ class Runtime:
         self.data_context.switch_outputs()
 
     def set_current_node(self, node_id: str):
+        if node_id == '__end__':
+            self.current_node_id = node_id
+            return
         if node_id not in self.nodes:
             raise KeyError(f"节点ID未找到: {node_id}")
         self.current_node_id = node_id

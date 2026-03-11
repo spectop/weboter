@@ -2,6 +2,7 @@ from weboter.public.contracts import *
 import playwright.async_api as pw
 from playwright_stealth import Stealth
 # async_playwright, Browser, Page
+
 class OpenBrowser(ActionBase):
     """Action to open a web browser instance."""
     name: str = "OpenBrowser"
@@ -49,7 +50,9 @@ class OpenBrowser(ActionBase):
         browser_context = await browser.new_context()
         stealth = Stealth()
         await stealth.apply_stealth_async(browser_context)
-        
+
+        io.outputs['browser'] = browser
+        # 特殊变量会被额外处理
         io.outputs['__pw_inst__'] = pw_instance
         io.outputs['__browser__'] = browser
         io.outputs['__browser_context__'] = browser_context
@@ -93,6 +96,8 @@ class OpenPage(ActionBase):
         if not isinstance(output["pages"], list):
             raise ValueError("Output 'pages' must be a list.")
         
+        io.outputs['page'] = page
+        # 特殊变量会被额外处理
         io.outputs['__page__'] = page
 
 class ClickItem(ActionBase):
@@ -348,8 +353,155 @@ class ExtractData(ActionBase):
             data = await element.get_attribute(attr_name)
         else:
             raise ValueError(f"Unsupported data source type: {data_source}")
-        
-        # for testing
-        print(f"Extracted data: {data}")
 
         io.outputs["data"] = data
+
+class GetElement(ActionBase):
+    """Action to get a web element using a locator."""
+    name: str = "GetElement"
+    description: str = "Get a web element using a locator"
+    inputs: list[InputFieldDeclaration] = [
+        InputFieldDeclaration(
+            name="locator",
+            description="The locator of the element to get",
+            required=True,
+            accepted_types=["LocatorDefine"]
+        ),
+        InputFieldDeclaration(
+            name="timeout",
+            description="Maximum time to wait for the selector (in milliseconds)",
+            required=False,
+            accepted_types=["integer"],
+            default=5000
+        )
+    ]
+    outputs: list[OutputFieldDeclaration] = [
+        OutputFieldDeclaration(
+            name="element",
+            description="The located web element",
+            type="WebElement"
+        )
+    ]
+
+    async def execute(self, io: IOPipe):
+        inputs = io.inputs
+        
+        if not inputs.get("locator"):
+            raise ValueError("Input 'locator' is required.")
+        locator = LocatorDefine.deserialize(inputs["locator"])
+
+        page = io.page
+        if not page:
+            raise ValueError("Current page is required in context.")
+        if not isinstance(page, pw.Page):
+            raise ValueError("Current page in context is not a valid Page object.")
+        
+        timeout = inputs.get("timeout", 5000)
+        if not isinstance(timeout, (int, float)):
+            timeout = 5000
+
+        element = utils.get_locator(page, locator)
+        await element.wait_for(state="visible", timeout=timeout)
+        io.outputs["element"] = element
+
+class NextElement(ActionBase):
+    """
+    Action to get the next sibling element of a given element.
+    If the current element is the last child, it will return null.
+    """
+    name: str = "NextElement"
+    description: str = "Get the next sibling element of a given element"
+    inputs: list[InputFieldDeclaration] = [
+        InputFieldDeclaration(
+            name="element",
+            description="The web element to find the next sibling of",
+            required=True,
+            accepted_types=["WebElement"]
+        )
+    ]
+    outputs: list[OutputFieldDeclaration] = [
+        OutputFieldDeclaration(
+            name="next_element",
+            description="The next sibling web element",
+            type="WebElement"
+        )
+    ]
+
+    async def execute(self, io: IOPipe):
+        element = io.inputs.get("element")
+        if not element:
+            raise ValueError("Input 'element' is required.")
+        if not isinstance(element, pw.ElementHandle):
+            raise ValueError("Input 'element' must be a valid WebElement object.")
+        
+        next_element = await element.evaluate_handle("el => el.nextElementSibling")
+        if next_element:
+            io.outputs["next_element"] = next_element
+        else:
+            io.outputs["next_element"] = None
+
+class PyEvalAction(ActionBase):
+    """[Not Safe] Action to execute custom Python code."""
+    name: str = "PyEvalAction"
+    description: str = "Execute custom Python code with access to the IOPipe context"
+    inputs: list[InputFieldDeclaration] = [
+        InputFieldDeclaration(
+            name="expr",
+            description="The Python expression to evaluate",
+            required=True,
+            accepted_types=["string"]
+        ),
+        InputFieldDeclaration(
+            name="param1",
+            description="Optional parameter 1",
+            required=False,
+            accepted_types=["any"]
+        ),
+        InputFieldDeclaration(
+            name="param2",
+            description="Optional parameter 2",
+            required=False,
+            accepted_types=["any"]
+        ),
+        InputFieldDeclaration(
+            name="param3",
+            description="Optional parameter 3",
+            required=False,
+            accepted_types=["any"]
+        ),
+        InputFieldDeclaration(
+            name="param4",
+            description="Optional parameter 4",
+            required=False,
+            accepted_types=["any"]
+        )
+    ]
+    outputs: list[OutputFieldDeclaration] = [
+        OutputFieldDeclaration(
+            name="result",
+            description="The result of the evaluated expression",
+            type="any"
+        )
+    ]
+
+    async def execute(self, io: IOPipe):
+        expr = io.inputs.get("expr")
+        if not expr:
+            raise ValueError("Input 'expr' is required.")
+        
+        # Provide the IOPipe context to the expression
+        local_context = {
+            "io": io,
+            "inputs": io.inputs,
+            "outputs": io.outputs,
+            "browser": io.browser,
+            "page": io.page
+        }
+        # Add optional params to the local context
+        for i in range(1, 5):
+            param_name = f"param{i}"
+            local_context[param_name] = io.inputs.get(param_name)
+
+        # Evaluate the expression and store the result
+        result = eval(expr, {}, local_context)
+        io.outputs["result"] = result

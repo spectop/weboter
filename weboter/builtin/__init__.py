@@ -14,6 +14,9 @@ actions = [
     basic_action.SleepFor,
     basic_action.EmptyAction,
     basic_action.ExtractData,
+    basic_action.GetElement,
+    basic_action.NextElement,
+    basic_action.PyEvalAction,
     # captcha
     captcha_action.SimpleSlideCaptcha,
     captcha_action.SimpleSlideNCC,
