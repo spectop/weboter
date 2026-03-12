@@ -1,7 +1,7 @@
 from .interface import LocatorDefine
 import playwright.async_api as pw
 
-def get_locator_recursive(obj: pw.Page | pw.Locator, locator_def: LocatorDefine) -> pw.Locator:
+def get_locator(obj: pw.Page | pw.Locator, locator_def: LocatorDefine) -> pw.Locator:
     """Recursively get a Playwright Locator from a LocatorDefine, supporting nested sub locators."""
     if locator_def.type == "text":
         current = obj.get_by_text(locator_def.element, **locator_def.ext)
@@ -24,10 +24,17 @@ def get_locator_recursive(obj: pw.Page | pw.Locator, locator_def: LocatorDefine)
     else:
         raise ValueError(f"Unsupported locator type: {locator_def.type}")
     
+    if isinstance(locator_def.pos, int):
+        current = current.nth(locator_def.pos)
+    elif locator_def.pos == "first":
+        current = current.first
+    elif locator_def.pos == "last":
+        current = current.last
+    elif locator_def.pos == "all":
+        pass  # keep all matches
+    else:
+        pass
+    
     if locator_def.sub:
-        return get_locator_recursive(current, locator_def.sub)
+        return get_locator(current, locator_def.sub)
     return current
-
-def get_locator(page: pw.Page, locator_def: LocatorDefine) -> pw.Locator:
-    """Convert a LocatorDefine to a Playwright Locator."""
-    return get_locator_recursive(page, locator_def)

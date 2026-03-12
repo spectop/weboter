@@ -23,13 +23,16 @@ class LocatorDefine:
     element: str
     type: str = "text"  # Type of the locator (role, text, label, placeholder, alt, title, testid, css, xpath)
     ext: dict = field(default_factory=dict)  # Additional locator information
+    # Position of the element if multiple are found, accepted values: "first", "last", "all", or an integer index (0-based)
+    pos: str | int = "first"
     sub: 'LocatorDefine | None' = None  # Optional sub-locator for nested elements
 
     def to_dict(self) -> dict:
         return {
             "element": self.element,
             "type": self.type,
-            "ext": self.ext
+            "ext": self.ext,
+            "pos": self.pos
         }
     
     @classmethod
@@ -37,7 +40,8 @@ class LocatorDefine:
         return cls(
             element=data.get("element", ""),
             type=data.get("type", "text"),
-            ext=data.get("ext", {})
+            ext=data.get("ext", {}),
+            pos=data.get("pos", "first")
         )
     
     def to_list(self) -> list:

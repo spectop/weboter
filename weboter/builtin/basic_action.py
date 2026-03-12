@@ -117,28 +117,40 @@ class ClickItem(ActionBase):
             required=False,
             accepted_types=["integer"],
             default=5000
+        ),
+        InputFieldDeclaration(
+            name="scope",
+            description="The scope to search for the locator, can be 'page' or a variable reference to a WebElement",
+            required=False,
+            accepted_types=["string"],
+            default="page"
         )
     ]
     outputs: list[OutputFieldDeclaration] = []
 
     async def execute(self, io: IOPipe):
         inputs = io.inputs
-
+        
+        scope = inputs.get("scope", "page")
         if "locator" not in inputs:
             raise ValueError("Input 'locator' is required.")
-        
-        page = io.page
-        if not page:
-            raise ValueError("Current page is required in context.")
-        if not isinstance(page, pw.Page):
-            raise ValueError("Current page in context is not a valid Page object.")
-        
+
         timeout = inputs.get("timeout", 5000)
         if not isinstance(timeout, (int, float)):
             timeout = 5000
-
+        
+        if scope == "page":
+            page = io.page
+            if not page:
+                raise ValueError("Current page is required in context.")
+            if not isinstance(page, pw.Page):
+                raise ValueError("Current page in context is not a valid Page object.")
+            scope = page
+        else:
+            pass
+        
         locator = LocatorDefine.deserialize(inputs["locator"])
-        element = utils.get_locator(page, locator)
+        element = utils.get_locator(scope, locator)
 
         await element.click(timeout=timeout)
 
