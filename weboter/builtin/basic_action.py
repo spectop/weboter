@@ -324,6 +324,13 @@ class ExtractData(ActionBase):
             required=False,
             accepted_types=["integer"],
             default=5000
+        ),
+        InputFieldDeclaration(
+            name="scope",
+            description="The scope to search for the locator, can be 'page' or a variable reference to a WebElement",
+            required=False,
+            accepted_types=["string"],
+            default="page"
         )
     ]
     outputs: list[OutputFieldDeclaration] = [
@@ -337,23 +344,28 @@ class ExtractData(ActionBase):
     async def execute(self, io: IOPipe):
         inputs = io.inputs
         
-        if not inputs.get("locator"):
+        scope = inputs.get("scope", "page")
+        if "locator" not in inputs:
             raise ValueError("Input 'locator' is required.")
-        locator = LocatorDefine.deserialize(inputs["locator"])
 
-        page = io.page
-        if not page:
-            raise ValueError("Current page is required in context.")
-        if not isinstance(page, pw.Page):
-            raise ValueError("Current page in context is not a valid Page object.")
-        
         timeout = inputs.get("timeout", 5000)
         if not isinstance(timeout, (int, float)):
             timeout = 5000
-        data_source = inputs.get("data_source", "text")
         
+        data_source = inputs.get("data_source", "text")
 
-        element = utils.get_locator(page, locator)
+        if scope == "page":
+            page = io.page
+            if not page:
+                raise ValueError("Current page is required in context.")
+            if not isinstance(page, pw.Page):
+                raise ValueError("Current page in context is not a valid Page object.")
+            scope = page
+        else:
+            pass
+
+        locator = LocatorDefine.deserialize(inputs["locator"])
+        element = utils.get_locator(scope, locator)
         await element.wait_for(state="visible", timeout=timeout)
         
         if data_source == "text":
@@ -366,6 +378,8 @@ class ExtractData(ActionBase):
         else:
             raise ValueError(f"Unsupported data source type: {data_source}")
 
+        # print for test
+        print(f"Extracted data: {data}")
         io.outputs["data"] = data
 
 class GetElement(ActionBase):
@@ -428,14 +442,14 @@ class NextElement(ActionBase):
             name="element",
             description="The web element to find the next sibling of",
             required=True,
-            accepted_types=["WebElement"]
+            accepted_types=["Locator"]
         )
     ]
     outputs: list[OutputFieldDeclaration] = [
         OutputFieldDeclaration(
             name="next_element",
             description="The next sibling web element",
-            type="WebElement"
+            type="Locator"
         )
     ]
 
@@ -443,14 +457,15 @@ class NextElement(ActionBase):
         element = io.inputs.get("element")
         if not element:
             raise ValueError("Input 'element' is required.")
-        if not isinstance(element, pw.ElementHandle):
-            raise ValueError("Input 'element' must be a valid WebElement object.")
+        if not isinstance(element, pw.Locator):
+            raise ValueError("Input 'element' must be a valid Locator object.")
         
-        next_element = await element.evaluate_handle("el => el.nextElementSibling")
-        if next_element:
-            io.outputs["next_element"] = next_element
-        else:
+        next_element = element.locator("xpath=following-sibling::*[1]")
+        count = await next_element.count()
+        if count == 0:
             io.outputs["next_element"] = None
+        else:
+            io.outputs["next_element"] = next_element
 
 class PyEvalAction(ActionBase):
     """[Not Safe] Action to execute custom Python code."""

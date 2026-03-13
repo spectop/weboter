@@ -83,8 +83,8 @@ class LoopUntil(ControlBase):
         loop_tries = io.params.get("loop_tries", 0)
         loop_fail_node = io.params.get("loop_fail_node", "")
 
-        if not loop_back or not loop_out or var is None:
-            raise ValueError("Params 'loop_back', 'loop_out', and 'var' are required.")
+        if not loop_back or not loop_out:
+            raise ValueError("Params 'loop_back' and 'loop_out' are required.")
 
         if var == value:
             return loop_out
