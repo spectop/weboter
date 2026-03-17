@@ -1,7 +1,7 @@
 """
 Contracts for Input/Output entities.
 """
-
+import logging
 from abc import ABC, abstractmethod
 import playwright.async_api as pw
 
@@ -15,6 +15,7 @@ class IOPipe(ABC):
         self._browser : pw.Browser = None
         self._page : pw.Page = None
         self._executor = None
+        self._logger: logging.Logger = None
 
     @property
     def inputs(self) -> dict:
@@ -63,6 +64,14 @@ class IOPipe(ABC):
     @executor.setter
     def executor(self, value):
         self._executor = value
+
+    @property
+    def logger(self) -> logging.Logger:
+        return self._logger
+    
+    @logger.setter
+    def logger(self, value: logging.Logger):
+        self._logger = value
 
     @property
     @abstractmethod

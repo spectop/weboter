@@ -24,7 +24,8 @@ class WorkflowReader:
                     inputs=node.get('inputs', {}),
                     outputs=[NodeOutputConfig(**output) for output in node.get('outputs', [])],
                     control=node.get('control', ''),
-                    params=node.get('params', {})
+                    params=node.get('params', {}),
+                    log=node.get('log', 'short')
                 ) for node in data['nodes']
             ]
 
@@ -37,7 +38,8 @@ class WorkflowReader:
                         description=data.get('description', ''),
                         start_node_id=data.get('start_node_id', '__start__'),
                         nodes=nodes,
-                        sub_flows=sub_flows)
+                        sub_flows=sub_flows,
+                        log=data.get('log', 'short'))
 
         except json.JSONDecodeError as e:
             raise WorkflowIOError(f"JSON解析错误: {e}")
@@ -71,14 +73,16 @@ class WorkflowWriter:
                     "inputs": node.inputs,  # 使用'inputs'键保持兼容
                     "outputs": [output.__dict__ for output in node.outputs],  # 使用'outputs'键保持兼容
                     "control": node.control,
-                    "params": node.params
+                    "params": node.params,
+                    "log": node.log
                 } for node in workflow.nodes
             ],
             "sub_flows": [
                 {
                     "file": str(sub_flow_file)
                 } for sub_flow_file in workflow.sub_flows
-            ]
+            ],
+            "log": workflow.log
         }
 
         try:

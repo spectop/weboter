@@ -1,7 +1,10 @@
+import logging
+
 from weboter.public.contracts import *
 import playwright.async_api as pw
 from playwright_stealth import Stealth
 # async_playwright, Browser, Page
+
 
 class SubFlow(ActionBase):
     """Action to execute a sub flow."""
@@ -351,7 +354,7 @@ class EmptyAction(ActionBase):
     async def execute(self, io: IOPipe):
         message = io.inputs.get("message", "")
         if message:
-            print(f"EmptyAction: {message}")
+            io.logger.info(f"   EmptyAction: {message}")
 
 class ExtractData(ActionBase):
     """Action to get data from the web page using a locator."""
@@ -431,8 +434,7 @@ class ExtractData(ActionBase):
         else:
             raise ValueError(f"Unsupported data source type: {data_source}")
 
-        # print for test
-        print(f"Extracted data: {data}")
+        io.logger.debug(f"   Extracted data: {data}")
         io.outputs["data"] = data
 
 class GetElement(ActionBase):

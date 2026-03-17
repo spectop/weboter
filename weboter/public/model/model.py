@@ -20,6 +20,7 @@ class Node:
     outputs: List[NodeOutputConfig] = field(default_factory=list)  # # 输出参数，此处的 outputs 和 io.outputs 是不同的概念，io.outputs 是运行时的输出数据，而这里的 outputs 是节点定义中声明输出如何转储
     control: str = ""  # 流程控制 格式: "package.ControlClass"
     params: Dict[str, str] = field(default_factory=dict)  # 控制参数
+    log: str = "short"  # log level for this node, accepted values: "none", "short", "full"
 
 @dataclass
 class Flow:
@@ -30,3 +31,4 @@ class Flow:
     start_node_id: str = ""  # 起始节点ID，如果不指定，使用 __start__ 作为默认起始节点
     nodes: List[Node] = field(default_factory=list)  # 节点列表
     sub_flows: List['Flow'] = field(default_factory=list)  # 子工作流列表
+    log: str = "short"  # log level for this flow, accepted values: "none", "short", "full"

@@ -1,3 +1,5 @@
+import logging
+
 from .runtime import Runtime, DataContext
 from .action_manager import action_manager
 from .control_manager import control_manager
@@ -8,22 +10,40 @@ from weboter.public.model import *
 
 class Executor:
     
-    def __init__(self):
+    def __init__(self, **kwargs):
         self.runtime: Runtime = Runtime()
         self.workflow: Flow | None = None
         self.action_manager = action_manager
         self.control_manager = control_manager
+        
+        logger = kwargs.get("logger", None)
+        if logger and isinstance(logger, logging.Logger):
+            self.logger = logger
+        else:
+            self.logger = None # 由于 flow 在加载工作流之前是未知的，因此无法在此处创建 logger，等工作流加载后再创建
+            pass
 
     def load_workflow(self, flow: Flow):
         self.workflow = flow
         self.runtime.init_with_flow(flow)
+        
+        # 创建 logger
+        if self.logger is None:
+            self.logger = logging.getLogger(f"Executor({flow.name})")
+            self.logger.setLevel(logging.DEBUG)
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+
+        self.logger.info(f">> Workflow '{flow.name}' loaded with {len(flow.nodes)} nodes and {len(flow.sub_flows)} sub-flows")
 
     def extract_outputs(self, node: Node, io: IOPipeImpl):
         pw_inst = io.outputs.get('__pw_inst__', None)
         if pw_inst:
             self.runtime.set_value("$global{{__pw_inst__}}", pw_inst)
         
-        # use browser_context and hide the original brower
+        # use browser_context and hide the original browser
         browser = io.outputs.get('__browser__', None)
         browser_context = io.outputs.get('__browser_context__', None)
         if browser and browser_context:
@@ -55,6 +75,7 @@ class Executor:
         inst.browser = self.runtime.get_value("$global{{__browser__}}")
         inst.page = self.runtime.get_value("$global{{current_page}}")
         inst.executor = self
+        inst.logger = self.logger
         return inst
 
     async def exec_action(self, action_name: str, io: IOPipeImpl):
@@ -71,6 +92,8 @@ class Executor:
             if isinstance(value, str) and DataContext.contains_var(value):
                 value = self.runtime.get_value(value)
             inst.params[key] = value
+        inst.executor = self
+        inst.logger = self.logger
         return inst
 
     async def exec_control(self, control_name: str, io: IOPipeImpl) -> str:
@@ -93,19 +116,38 @@ class Executor:
         if not node.control:
             raise ValueError(f"Node '{node_id}' has no control to execute")
         
+        if node.log == "none" or self.workflow.log == "none":
+            self.logger.setLevel(logging.WARNING)
+        else:
+            self.logger.setLevel(logging.DEBUG)
+
+        self.logger.info("")
+        self.logger.info(f"=> Executing node '{node.name}' (ID: {node.node_id})")
+        
         if node.action:
             action_io = self.prepare_action_io(node)
+            if node.log == "short" or self.workflow.log == "short":
+                self.logger.info(f"   Action: {node.action}")
+            else:
+                self.logger.info(f"   Action: {node.action} with inputs {action_io.inputs}")
             await self.exec_action(node.action, action_io)
             self.extract_outputs(node, action_io)
+            self.logger.info(f"   Action Done.")
 
         # subflow action 有可能通过跳转到 __exit__ 来提前结束流程
         # 因此在执行控制流之前需要检查流程是否已经结束
         if self.runtime.should_exit():
+            self.logger.info(f"   Current flow should exit!")
             self.runtime.set_current_node('__exit__')
             return
         
         control_io = self.prepare_control_io(node)
+        if node.log == "short" or self.workflow.log == "short":
+            self.logger.info(f"   Control: {node.control}")
+        else:
+            self.logger.info(f"   Control: {node.control} with params {control_io.params}")
         next_node_id = await self.exec_control(node.control, control_io)
+        self.logger.info(f"   Next node: '{self.runtime.get_node_name(next_node_id)}' (ID: {next_node_id})")
         self.runtime.set_current_node(next_node_id)
         self.runtime.switch_outputs()
     
@@ -131,7 +173,9 @@ class Executor:
         if not flow_id:
             raise ValueError("Param 'flow_id' is required for sub_flow_func")
 
-        executor = Executor()
+        self.logger.info(f'   Starting sub flow with ID: {flow_id} >>>>>>>>')
+        self.logger.info('')
+        executor = Executor(logger=self.logger)
         flow = self.get_subflow(flow_id)
         if not flow:
             raise ValueError(f"Sub flow '{flow_id}' not found")
@@ -170,4 +214,6 @@ class Executor:
         
         if sub_rt.should_exit():
             self.runtime.set_current_node('__exit__')
+
+        self.logger.info(f'   Sub flow with ID: {flow_id} finished <<<<<<<<')
         

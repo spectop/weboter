@@ -184,6 +184,11 @@ class Runtime:
         if node_id not in self.nodes:
             raise KeyError(f"节点ID未找到: {node_id}")
         return self.nodes[node_id]
+    
+    def get_node_name(self, node_id: str) -> str:
+        if node_id not in self.nodes:
+            return node_id
+        return self.nodes[node_id].name
 
     def copy_data(self, other: 'Runtime', prefix: str = ""):
         self.data_context.copy_data(other.data_context, prefix)
