@@ -163,6 +163,13 @@ class ClickItem(ActionBase):
             required=False,
             accepted_types=["string"],
             default="page"
+        ),
+        InputFieldDeclaration(
+            name="no_error",
+            description="Set True make this action become ClickIfExists, which will not raise error even the element is not found",
+            required=False,
+            accepted_types=["boolean"],
+            default=False
         )
     ]
     outputs: list[OutputFieldDeclaration] = []
@@ -191,7 +198,14 @@ class ClickItem(ActionBase):
         locator = LocatorDefine.deserialize(inputs["locator"])
         element = utils.get_locator(scope, locator)
 
-        await element.click(timeout=timeout)
+        no_error = inputs.get("no_error", False)
+        if no_error:
+            try:
+                await element.click(timeout=timeout)
+            except pw.TimeoutError:
+                pass
+        else:
+            await element.click(timeout=timeout)
 
 class FillInput(ActionBase):
     """Action to fill an input field on the web page given a locator."""

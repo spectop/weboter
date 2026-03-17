@@ -147,7 +147,10 @@ class Runtime:
         self.current_node_id: str | None = None
     
     def finished(self) -> bool:
-        return self.current_node_id == '__end__'
+        return self.current_node_id == '__end__' or self.current_node_id == '__exit__'
+    
+    def should_exit(self) -> bool:
+        return self.current_node_id == '__exit__'
     
     def init_with_flow(self, flow: Flow):
         self.flow = flow
@@ -168,6 +171,9 @@ class Runtime:
 
     def set_current_node(self, node_id: str):
         if node_id == '__end__':
+            self.current_node_id = node_id
+            return
+        if node_id == '__exit__':
             self.current_node_id = node_id
             return
         if node_id not in self.nodes:

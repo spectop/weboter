@@ -97,6 +97,12 @@ class Executor:
             action_io = self.prepare_action_io(node)
             await self.exec_action(node.action, action_io)
             self.extract_outputs(node, action_io)
+
+        # subflow action 有可能通过跳转到 __exit__ 来提前结束流程
+        # 因此在执行控制流之前需要检查流程是否已经结束
+        if self.runtime.should_exit():
+            self.runtime.set_current_node('__exit__')
+            return
         
         control_io = self.prepare_control_io(node)
         next_node_id = await self.exec_control(node.control, control_io)
@@ -161,4 +167,7 @@ class Executor:
                 io.outputs[dst] = value
             else:
                 self.runtime.set_value(dst, value)
+        
+        if sub_rt.should_exit():
+            self.runtime.set_current_node('__exit__')
         
