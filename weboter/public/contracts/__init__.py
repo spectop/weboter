@@ -10,7 +10,7 @@ from .action import ActionBase
 from .control import ControlBase
 from .io_pipe import IOPipe
 from .interface import InputFieldDeclaration, OutputFieldDeclaration
-from .interface import LocatorDefine
+from .interface import LocatorDefine, VarPicker
 from . import utils
 
 __all__ = [
@@ -20,5 +20,6 @@ __all__ = [
     "InputFieldDeclaration",
     "OutputFieldDeclaration",
     "LocatorDefine",
+    "VarPicker",
     "utils"
 ]

@@ -3,6 +3,45 @@ import playwright.async_api as pw
 from playwright_stealth import Stealth
 # async_playwright, Browser, Page
 
+class SubFlow(ActionBase):
+    """Action to execute a sub flow."""
+    name: str = "SubFlow"
+    description: str = "Execute a sub flow defined in a separate file"
+    inputs: list[InputFieldDeclaration] = [
+        InputFieldDeclaration(
+            name="flow_id",
+            description="The ID of the sub flow to execute",
+            required=True,
+            accepted_types=["string"]
+        ),
+        InputFieldDeclaration(
+            name="data_in",
+            description="A list of VarPicker to specify which variables to pass to the sub flow, src -> $flow.dst",
+            required=False,
+            accepted_types=["list"],
+            default=[]
+        ),
+        InputFieldDeclaration(
+            name="data_out",
+            description="A list of VarPicker to specify which variables to extract from the sub flow after execution, src -> $output.dst",
+            required=False,
+            accepted_types=["list"],
+            default=[]
+        )
+    ]
+    outputs: list[OutputFieldDeclaration] = []
+
+    async def execute(self, io: IOPipe):
+        executor = io.executor
+        if not executor:
+            raise ValueError("Executor is required in IOPipe context to execute sub flow.")
+        if not hasattr(executor, "sub_flow_func") or not callable(executor.sub_flow_func):
+            raise ValueError("Executor does not have a callable 'sub_flow_func' method to execute sub flow.")
+        flow_id = io.inputs.get("flow_id")
+        if not flow_id:
+            raise ValueError("Input 'flow_id' is required to execute sub flow.")
+        await executor.sub_flow_func(io)
+
 class OpenBrowser(ActionBase):
     """Action to open a web browser instance."""
     name: str = "OpenBrowser"

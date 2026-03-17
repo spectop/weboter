@@ -27,5 +27,6 @@ class Flow:
     flow_id: str  # 工作流唯一标识
     name: str # name of the node
     description: str # description of the node
-    start_node_id: str = ""  # 起始节点ID
+    start_node_id: str = ""  # 起始节点ID，如果不指定，使用 __start__ 作为默认起始节点
     nodes: List[Node] = field(default_factory=list)  # 节点列表
+    sub_flows: List['Flow'] = field(default_factory=list)  # 子工作流列表

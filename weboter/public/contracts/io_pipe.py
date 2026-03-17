@@ -14,6 +14,7 @@ class IOPipe(ABC):
         self._pw_inst : pw.Playwright = None
         self._browser : pw.Browser = None
         self._page : pw.Page = None
+        self._executor = None
 
     @property
     def inputs(self) -> dict:
@@ -54,6 +55,14 @@ class IOPipe(ABC):
     @property
     def params(self) -> dict:
         return self._params
+    
+    @property
+    def executor(self):
+        return self._executor
+    
+    @executor.setter
+    def executor(self, value):
+        self._executor = value
 
     @property
     @abstractmethod

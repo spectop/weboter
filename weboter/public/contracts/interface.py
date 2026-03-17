@@ -73,4 +73,30 @@ class LocatorDefine:
             return cls.from_dict(data)
         else:
             raise ValueError("Input data must be a dict or a list")
-    
+
+@dataclass
+class VarPicker:
+    """
+    A variable picker defines how to pick a variable from the data context, which can be used in action inputs or control parameters.
+    """
+    name: str
+    src: str  # Source of the variable
+    dst: str = ""  # Destination variable name to store the picked value
+    value: any = None  # Value of the variable
+
+    def serialize(self) -> dict:
+        return {
+            "name": self.name,
+            "src": self.src,
+            "dst": self.dst,
+            "value": self.value
+        }
+
+    @classmethod
+    def deserialize(cls, data: dict) -> 'VarPicker':
+        return cls(
+            name=data.get("name", ""),
+            src=data.get("src", ""),
+            dst=data.get("dst", ""),
+            value=data.get("value", None)
+        )

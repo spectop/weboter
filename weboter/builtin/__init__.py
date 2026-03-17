@@ -5,6 +5,8 @@ from . import captcha_action
 package_name = "builtin"
 
 actions = [
+    # special
+    basic_action.SubFlow,  # special action for executing sub flows, it should not be used directly in nodes, but will be used by the excutor when executing sub flows
     # basic
     basic_action.OpenBrowser,
     basic_action.OpenPage,

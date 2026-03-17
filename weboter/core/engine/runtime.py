@@ -44,7 +44,7 @@ class DataContext:
         value = collection
         for part in parts:
             if part not in value:
-                raise KeyError(f"变量未定义: {key}")
+                return None
             value = value[part]
         return value
 
@@ -119,6 +119,24 @@ class DataContext:
         self.data['prev_outputs'] = self.data['cur_outputs']
         self.data['cur_outputs'] = {}
 
+    def copy_data(self, other: 'DataContext', prefix: str = ""):
+        """
+        将另一个数据上下文的数据复制到当前上下文中，常用于子流程调用
+        如 prefix="global"，则会将另一个上下文中 global 部分的数据复制到当前上下文的 global 部分
+        """
+        prefix_vec = prefix.split('.') if prefix else []
+        # todo: 目前仅支持一层前缀，后续可以改进为支持多层前缀
+        if len(prefix_vec) < 1:
+            # 没有前缀，复制全部数据
+            self.data = other.data
+        else:
+            # 仅复制指定前缀的数据
+            prefix_key = prefix_vec[0]
+            if prefix_key not in other.data:
+                return
+            self.data[prefix_key] = other.data[prefix_key]
+
+
 class Runtime:
     
     def __init__(self):
@@ -160,6 +178,9 @@ class Runtime:
         if node_id not in self.nodes:
             raise KeyError(f"节点ID未找到: {node_id}")
         return self.nodes[node_id]
+
+    def copy_data(self, other: 'Runtime', prefix: str = ""):
+        self.data_context.copy_data(other.data_context, prefix)
 
     def __load_environment(self):
         # 加载环境变量到数据上下文

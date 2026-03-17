@@ -2,17 +2,18 @@ import json
 from pathlib import Path
 from typing import Optional
 from weboter.public.model import Node, Flow, NodeOutputConfig
+
 class WorkflowIOError(Exception):
     """工作流读写操作异常基类"""
     pass
 
 class WorkflowReader:
+
     @staticmethod
-    def from_json(file_path: Path) -> Flow:
-        """从JSON文件读取工作流数据"""
+    def from_jstr(json_str: str) -> Flow:
+        """从JSON字符串读取工作流数据"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            data = json.loads(json_str)
 
             nodes = [
                 Node(
@@ -27,18 +28,32 @@ class WorkflowReader:
                 ) for node in data['nodes']
             ]
 
+            sub_flows = [
+                WorkflowReader.from_jstr(json.dumps(sub_flow_data)) for sub_flow_data in data.get('sub_flows', [])
+            ]
+
             return Flow(flow_id=data['id'],
                         name=data['name'],
                         description=data.get('description', ''),
-                        start_node_id=data.get('start_node_id'),
-                        nodes=nodes)
+                        start_node_id=data.get('start_node_id', '__start__'),
+                        nodes=nodes,
+                        sub_flows=sub_flows)
 
-        except FileNotFoundError:
-            raise WorkflowIOError(f"文件未找到: {file_path}")
         except json.JSONDecodeError as e:
             raise WorkflowIOError(f"JSON解析错误: {e}")
         except KeyError as e:
             raise WorkflowIOError(f"缺少必要字段: {e}")
+
+    @staticmethod
+    def from_json(file_path: Path) -> Flow:
+        """从JSON文件读取工作流数据"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            return WorkflowReader.from_jstr(json.dumps(data))
+        except OSError as e:
+            raise WorkflowIOError(f"文件读取失败: {e}")
 
 class WorkflowWriter:
     @staticmethod
@@ -58,6 +73,11 @@ class WorkflowWriter:
                     "control": node.control,
                     "params": node.params
                 } for node in workflow.nodes
+            ],
+            "sub_flows": [
+                {
+                    "file": str(sub_flow_file)
+                } for sub_flow_file in workflow.sub_flows
             ]
         }
 
