@@ -1,5 +1,76 @@
-Weboter 是一个可配置的网页自动化工具，旨在通过配置文件实现自动化任务的执行。避免频繁修改代码，只需调整配置文件即可满足不同需求。
+# Weboter
 
-Weboter 使用类似 ComfyUI 的配置格式，支持多种节点类型和参数设置。以方便后续进行可视化界面的拓展。
+Weboter 是一个配置驱动的网页自动化框架。当前阶段优先交付一个可在 Linux/WSL 环境运行的 workflow service，让用户可以直接上传 workflow 文件或指定 workflow 目录，并通过 CLI 执行。
 
-内置多种常见操作，模拟用户行为，如点击、输入文本、等待等。且允许用户通过自定义操作拓展功能。
+## 当前能力
+
+- 使用 JSON 描述 workflow
+- 通过 `Executor` 执行节点和控制流
+- 支持 `weboter workflow --upload` 上传单个 workflow 到本地 service 目录
+- 支持 `weboter workflow --dir` 从指定目录解析或列举 workflow
+- 支持基础内置动作与控制，不依赖验证码相关可选包也能运行基础流程
+
+## 安装
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e .
+playwright install chromium
+```
+
+如果需要浏览器伪装或验证码相关动作，再安装可选依赖：
+
+```bash
+python -m pip install -e '.[browser]'
+python -m pip install -e '.[captcha]'
+```
+
+默认情况下，本地 service 数据目录固定在仓库根目录下的 `.weboter/`。如果你希望改到其他位置，可以设置环境变量 `WEBOTER_HOME`。
+
+## 使用
+
+上传一个 workflow 到本地 service 目录：
+
+```bash
+weboter workflow --upload workflows/demo_empty.json
+```
+
+上传并立即执行：
+
+```bash
+weboter workflow --upload workflows/demo_empty.json --execute
+```
+
+从指定目录列出 workflow：
+
+```bash
+weboter workflow --dir workflows --list
+```
+
+从指定目录解析并执行一个 workflow：
+
+```bash
+weboter workflow --dir workflows --name demo_empty --execute
+```
+
+## 示例 workflow
+
+仓库提供了一个不访问外部站点的最小示例：`workflows/demo_empty.json`。
+
+这个 workflow 只执行 `builtin.EmptyAction`，用于验证 CLI、workflow 解析和执行链路是否可用。
+
+## 路线图
+
+1. 补齐 workflow service 的测试与错误处理
+2. 增加目录监听模式
+3. 引入 MCP 和 AI 辅助调试接口
+4. 构建可视化 workflow 编辑界面
+
+## Q&A
+
+### 为什么需要 Weboter，而不是每次都直接用 Agent 自动化？
+
+Agent 的执行过程如果缺少足够强的 harness，结果容易不稳定。把稳定流程沉淀成 workflow 后，可以降低不确定性，也能减少重复调用模型带来的成本。
+

@@ -2,7 +2,11 @@ import logging
 
 from weboter.public.contracts import *
 import playwright.async_api as pw
-from playwright_stealth import Stealth
+
+try:
+    from playwright_stealth import Stealth
+except Exception:
+    Stealth = None
 # async_playwright, Browser, Page
 
 
@@ -90,8 +94,9 @@ class OpenBrowser(ActionBase):
             raise ValueError(f"Unsupported browser type: {browser_type}")
         
         browser_context = await browser.new_context()
-        stealth = Stealth()
-        await stealth.apply_stealth_async(browser_context)
+        if Stealth is not None:
+            stealth = Stealth()
+            await stealth.apply_stealth_async(browser_context)
 
         io.outputs['browser'] = browser
         # 特殊变量会被额外处理
@@ -587,3 +592,140 @@ class PyEvalAction(ActionBase):
         # Evaluate the expression and store the result
         result = eval(expr, {}, local_context)
         io.outputs["result"] = result
+
+class WriteTextFile(ActionBase):
+    """Action to write text content to a file."""
+    name: str = "WriteTextFile"
+    description: str = "Write text content to a file on disk"
+    inputs: list[InputFieldDeclaration] = [
+        InputFieldDeclaration(
+            name="path",
+            description="The destination file path",
+            required=True,
+            accepted_types=["string"]
+        ),
+        InputFieldDeclaration(
+            name="content",
+            description="The text content to write",
+            required=True,
+            accepted_types=["string"]
+        ),
+        InputFieldDeclaration(
+            name="encoding",
+            description="The file encoding",
+            required=False,
+            accepted_types=["string"],
+            default="utf-8"
+        ),
+        InputFieldDeclaration(
+            name="append",
+            description="Whether to append instead of overwrite",
+            required=False,
+            accepted_types=["boolean"],
+            default=False
+        )
+    ]
+    outputs: list[OutputFieldDeclaration] = [
+        OutputFieldDeclaration(
+            name="path",
+            description="The written file path",
+            type="string"
+        ),
+        OutputFieldDeclaration(
+            name="bytes_written",
+            description="How many bytes were written",
+            type="integer"
+        )
+    ]
+
+    async def execute(self, io: IOPipe):
+        from pathlib import Path
+
+        path = io.inputs.get("path")
+        content = io.inputs.get("content")
+        encoding = io.inputs.get("encoding", "utf-8")
+        append = io.inputs.get("append", False)
+
+        if not path:
+            raise ValueError("Input 'path' is required.")
+        if content is None:
+            raise ValueError("Input 'content' is required.")
+
+        target_path = Path(path).expanduser()
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        mode = "a" if append else "w"
+        with open(target_path, mode, encoding=encoding) as file_obj:
+            file_obj.write(content)
+
+        io.outputs["path"] = str(target_path.resolve())
+        io.outputs["bytes_written"] = len(content.encode(encoding))
+
+class FetchUrl(ActionBase):
+    """Action to fetch text content from an HTTP URL."""
+    name: str = "FetchUrl"
+    description: str = "Fetch text content from a URL"
+    inputs: list[InputFieldDeclaration] = [
+        InputFieldDeclaration(
+            name="url",
+            description="The target URL",
+            required=True,
+            accepted_types=["string"]
+        ),
+        InputFieldDeclaration(
+            name="timeout",
+            description="Request timeout in seconds",
+            required=False,
+            accepted_types=["number"],
+            default=15
+        ),
+        InputFieldDeclaration(
+            name="encoding",
+            description="Response encoding, empty means auto detect from headers",
+            required=False,
+            accepted_types=["string"],
+            default=""
+        )
+    ]
+    outputs: list[OutputFieldDeclaration] = [
+        OutputFieldDeclaration(
+            name="content",
+            description="The fetched text content",
+            type="string"
+        ),
+        OutputFieldDeclaration(
+            name="final_url",
+            description="The final URL after redirects",
+            type="string"
+        ),
+        OutputFieldDeclaration(
+            name="status_code",
+            description="The HTTP status code",
+            type="integer"
+        )
+    ]
+
+    async def execute(self, io: IOPipe):
+        import urllib.request
+
+        url = io.inputs.get("url")
+        timeout = io.inputs.get("timeout", 15)
+        encoding = io.inputs.get("encoding", "")
+
+        if not url:
+            raise ValueError("Input 'url' is required.")
+        if not isinstance(timeout, (int, float)):
+            timeout = 15
+
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0 Safari/537.36"
+            },
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw_content = response.read()
+            response_encoding = encoding or response.headers.get_content_charset() or "utf-8"
+            io.outputs["content"] = raw_content.decode(response_encoding, errors="ignore")
+            io.outputs["final_url"] = response.geturl()
+            io.outputs["status_code"] = getattr(response, "status", 200)

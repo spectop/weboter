@@ -1,4 +1,6 @@
 workflows/*
+!workflows/demo_empty.json
+.weboter/
 .venv/
 __pycache__/
 *.pyc

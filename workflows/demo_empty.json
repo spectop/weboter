@@ -1,0 +1,24 @@
+{
+  "id": "demo_empty",
+  "name": "Demo Empty Workflow",
+  "description": "用于验证 CLI 和执行链路的最小 workflow",
+  "start_node_id": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "name": "Start",
+      "description": "执行一个空动作并结束",
+      "action": "builtin.EmptyAction",
+      "inputs": {
+        "message": "demo workflow executed"
+      },
+      "control": "builtin.NextNode",
+      "params": {
+        "next_node": "__end__"
+      },
+      "log": "short"
+    }
+  ],
+  "sub_flows": [],
+  "log": "short"
+}

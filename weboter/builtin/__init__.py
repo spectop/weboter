@@ -1,8 +1,21 @@
 from . import basic_action
 from . import basic_control
-from . import captcha_action
 
 package_name = "builtin"
+
+captcha_actions = []
+
+try:
+    from . import captcha_action
+
+    captcha_actions = [
+        captcha_action.SimpleSlideCaptcha,
+        captcha_action.SimpleSlideNCC,
+    ]
+except ModuleNotFoundError as exc:
+    if exc.name not in {"cv2", "numpy"}:
+        raise
+    captcha_actions = []
 
 actions = [
     # special
@@ -19,10 +32,11 @@ actions = [
     basic_action.GetElement,
     basic_action.NextElement,
     basic_action.PyEvalAction,
-    # captcha
-    captcha_action.SimpleSlideCaptcha,
-    captcha_action.SimpleSlideNCC,
+    basic_action.WriteTextFile,
+    basic_action.FetchUrl,
 ]
+
+actions.extend(captcha_actions)
 
 controls = [
     basic_control.NextNode,
