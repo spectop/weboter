@@ -31,6 +31,7 @@ class WorkflowDirectoryRequest(BaseModel):
     directory: str
     name: str | None = None
     list: bool = False
+    delete: bool = False
     execute: bool = False
 
 
@@ -130,9 +131,11 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     def workflow_dir(payload: WorkflowDirectoryRequest) -> dict[str, Any]:
         try:
             if payload.list:
-                return service.handle_directory_request(Path(payload.directory), payload.name, True, False)
+                return service.handle_directory_request(Path(payload.directory), payload.name, True, False, False)
+            if payload.delete:
+                return service.handle_directory_request(Path(payload.directory), payload.name, False, True, False)
             if not payload.execute:
-                return service.handle_directory_request(Path(payload.directory), payload.name, False, False)
+                return service.handle_directory_request(Path(payload.directory), payload.name, False, False, False)
             resolution = service.resolve_from_directory(Path(payload.directory), payload.name)
             task = task_manager.submit(resolution.source_path, trigger="directory")
             return {

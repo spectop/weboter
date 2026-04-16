@@ -26,38 +26,38 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=textwrap.dedent(
             """
             快速开始:
-              weboter serve start
+              weboter service start
               weboter workflow --list
               weboter workflow --dir workflows --name demo_empty --execute --wait
               weboter task list
-              weboter serve logs --lines 50
+              weboter service logs --lines 50
             """
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    serve_parser = subparsers.add_parser(
-        "serve",
+    service_parser = subparsers.add_parser(
+        "service",
         help="启动或管理后台 service",
         description="管理 Weboter 后台 service。用于启动、停止、查看状态和查看系统日志。",
         epilog=textwrap.dedent(
             """
             示例:
-              weboter serve start
-              weboter serve status --json
-              weboter serve logs --lines 100
-              weboter serve stop
+              weboter service start
+              weboter service status --json
+              weboter service logs --lines 100
+              weboter service stop
             """
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    serve_parser.add_argument("action", choices=["start", "stop", "status", "logs"])
-    serve_parser.add_argument("--host", default=DEFAULT_SERVICE_HOST, help="service 监听地址")
-    serve_parser.add_argument("--port", type=int, default=DEFAULT_SERVICE_PORT, help="service 监听端口，默认自动分配")
-    serve_parser.add_argument("--lines", type=int, default=200, help="查看日志时输出的最后行数")
-    serve_parser.add_argument("--json", action="store_true", help="以 JSON 输出 service 结果")
-    serve_parser.add_argument("--foreground", action="store_true", help=argparse.SUPPRESS)
+    service_parser.add_argument("action", choices=["start", "stop", "status", "logs"])
+    service_parser.add_argument("--host", default=DEFAULT_SERVICE_HOST, help="service 监听地址")
+    service_parser.add_argument("--port", type=int, default=DEFAULT_SERVICE_PORT, help="service 监听端口，默认自动分配")
+    service_parser.add_argument("--lines", type=int, default=200, help="查看日志时输出的最后行数")
+    service_parser.add_argument("--json", action="store_true", help="以 JSON 输出 service 结果")
+    service_parser.add_argument("--foreground", action="store_true", help=argparse.SUPPRESS)
 
     workflow_parser = subparsers.add_parser(
         "workflow",
@@ -91,12 +91,13 @@ def build_parser() -> argparse.ArgumentParser:
     task_parser = subparsers.add_parser(
         "task",
         help="查看和管理任务",
-        description="查看历史任务、等待任务完成、读取任务日志。service 停止后仍可读取本地历史记录。",
+                description="查看历史任务、等待任务完成、读取任务日志。service 停止后仍可读取本地历史记录。task_id 支持唯一前缀匹配。",
         epilog=textwrap.dedent(
             """
             示例:
               weboter task list
               weboter task show <task_id>
+                            weboter task show 3d61013
               weboter task logs <task_id> --lines 100
               weboter task wait <task_id> --timeout 30
             """
@@ -284,6 +285,6 @@ def main() -> int:
     except (FileNotFoundError, NotADirectoryError, ValueError, ServiceClientError) as exc:
         message = str(exc)
         if isinstance(exc, ServiceClientError) and args.execute and not args.local:
-            message = f"{message}；可先执行 `weboter serve start`，或临时使用 `--local`"
+            message = f"{message}；可先执行 `weboter service start`，或临时使用 `--local`"
         print(f"error: {message}", file=sys.stderr)
         return 2

@@ -121,6 +121,8 @@ weboter task logs <task_id> --lines 100
 weboter task wait <task_id>
 ```
 
+`task_id` 支持类似 Docker 的唯一前缀匹配，只要前缀能唯一定位任务即可。
+
 `serve status`、`workflow ... --execute`、`task show`、`task list`、`task logs` 这些命令也都支持 `--json` 输出。
 
 如果你想临时绕过后台 service，仍然可以用本地模式：

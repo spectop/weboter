@@ -69,6 +69,7 @@ class WorkflowServiceClient:
         directory: Path,
         workflow_name: str | None = None,
         list_only: bool = False,
+        delete: bool = False,
         execute: bool = False,
     ) -> dict[str, Any]:
         return self._request(
@@ -78,6 +79,7 @@ class WorkflowServiceClient:
                 "directory": str(directory.expanduser().resolve()),
                 "name": workflow_name,
                 "list": list_only,
+                "delete": delete,
                 "execute": execute,
             },
         )

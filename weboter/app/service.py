@@ -104,6 +104,14 @@ class WorkflowService:
             raise NotADirectoryError(f"Workflow directory not found: {directory_path}")
         return sorted(directory_path.glob("*.json"))
 
+    def delete_workflow(self, directory: Path, workflow_name: str | None = None) -> Path:
+        resolution = self.resolve_from_directory(directory, workflow_name)
+        workflow_path = resolution.source_path
+        if not workflow_path.is_file():
+            raise FileNotFoundError(f"Workflow file not found: {workflow_path}")
+        workflow_path.unlink()
+        return workflow_path
+
     def run_workflow(self, workflow_path: Path, logger: logging.Logger | None = None) -> Path:
         ensure_builtin_packages_registered()
         flow = WorkflowReader.from_json(workflow_path)
@@ -127,11 +135,16 @@ class WorkflowService:
         directory: Path,
         workflow_name: str | None = None,
         list_only: bool = False,
+        delete: bool = False,
         execute: bool = False,
     ) -> dict[str, Any]:
         if list_only:
             workflows = self.list_directory_workflows(directory)
             return {"items": [str(item) for item in workflows]}
+
+        if delete:
+            deleted_path = self.delete_workflow(directory, workflow_name)
+            return {"deleted": str(deleted_path)}
 
         resolution = self.resolve_from_directory(directory, workflow_name)
         response: dict[str, Any] = {"resolved": str(resolution.source_path)}

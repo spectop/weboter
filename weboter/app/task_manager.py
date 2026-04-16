@@ -70,9 +70,7 @@ class TaskManager:
         return records
 
     def get_task(self, task_id: str) -> TaskRecord:
-        task_file = self.task_root / f"{task_id}.json"
-        if not task_file.is_file():
-            raise FileNotFoundError(f"Task not found: {task_id}")
+        task_file = self._resolve_task_file(task_id)
         return self._load_from_file(task_file)
 
     def read_task_log(self, task_id: str, lines: int = 200) -> dict[str, Any]:
@@ -130,6 +128,19 @@ class TaskManager:
 
     def _task_file(self, task_id: str) -> Path:
         return self.task_root / f"{task_id}.json"
+
+    def _resolve_task_file(self, task_id: str) -> Path:
+        exact_match = self._task_file(task_id)
+        if exact_match.is_file():
+            return exact_match
+
+        matches = sorted(self.task_root.glob(f"{task_id}*.json"))
+        if not matches:
+            raise FileNotFoundError(f"Task not found: {task_id}")
+        if len(matches) > 1:
+            candidates = ", ".join(path.stem for path in matches[:5])
+            raise ValueError(f"Task id prefix is ambiguous: {task_id} -> {candidates}")
+        return matches[0]
 
     def _save(self, record: TaskRecord) -> None:
         with self._lock:
