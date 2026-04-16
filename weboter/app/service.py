@@ -1,6 +1,7 @@
 import asyncio
 from dataclasses import asdict, dataclass
 import json
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -103,10 +104,10 @@ class WorkflowService:
             raise NotADirectoryError(f"Workflow directory not found: {directory_path}")
         return sorted(directory_path.glob("*.json"))
 
-    def run_workflow(self, workflow_path: Path) -> Path:
+    def run_workflow(self, workflow_path: Path, logger: logging.Logger | None = None) -> Path:
         ensure_builtin_packages_registered()
         flow = WorkflowReader.from_json(workflow_path)
-        executor = Executor()
+        executor = Executor(logger=logger)
         executor.load_workflow(flow)
         asyncio.run(executor.run())
         return workflow_path

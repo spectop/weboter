@@ -10,6 +10,7 @@ Weboter 是一个配置驱动的网页自动化框架。当前阶段优先交付
 - 支持 `weboter serve start` 启动本地后台 service
 - 支持 CLI 作为 client，把 workflow 文件或目录路径发送给后台 service
 - 支持 OpenAPI 文档和结构化 JSON 输出，便于后续 agent / MCP 集成
+- 支持后台任务执行、任务状态查看、任务日志查看和系统日志查看
 - 支持基础内置动作与控制，不依赖验证码相关可选包也能运行基础流程
 
 ## 安装
@@ -45,8 +46,10 @@ service 启动后会暴露：
 
 - `GET /health` 用于存活检查
 - `GET /service/state` 用于读取当前 service 元数据
+- `GET /service/logs` 用于读取系统日志
 - `POST /workflow/upload` 用于上传并可选执行 workflow
 - `POST /workflow/dir` 用于列举、解析或执行目录中的 workflow
+- `GET /tasks` / `GET /tasks/{task_id}` / `GET /tasks/{task_id}/logs` 用于任务查看和日志读取
 - `GET /openapi.json` 和 `GET /docs` 用于 API 描述和调试
 
 查看 service 状态：
@@ -65,6 +68,12 @@ weboter serve status --json
 
 ```bash
 weboter serve stop
+```
+
+查看系统日志：
+
+```bash
+weboter serve logs --lines 100
 ```
 
 上传一个 workflow 到本地 service 目录：
@@ -91,17 +100,36 @@ weboter workflow --dir workflows --list
 weboter workflow --dir workflows --name demo_empty --execute
 ```
 
+如果希望提交任务后等待执行结束：
+
+```bash
+weboter workflow --dir workflows --name demo_empty --execute --wait
+```
+
 如果上层调用方需要稳定的机器可读结果，可以启用 `--json`：
 
 ```bash
 weboter workflow --dir workflows --name demo_empty --execute --json
 ```
 
+任务管理：
+
+```bash
+weboter task list
+weboter task show <task_id>
+weboter task logs <task_id> --lines 100
+weboter task wait <task_id>
+```
+
+`serve status`、`workflow ... --execute`、`task show`、`task list`、`task logs` 这些命令也都支持 `--json` 输出。
+
 如果你想临时绕过后台 service，仍然可以用本地模式：
 
 ```bash
 weboter workflow --dir workflows --name demo_empty --execute --local
 ```
+
+当 service 已停止时，`weboter serve logs`、`weboter task list` 和 `weboter task logs` 仍然会直接读取 `.weboter/` 下的本地历史文件，方便排查问题。
 
 ## 示例 workflow
 
@@ -111,8 +139,8 @@ weboter workflow --dir workflows --name demo_empty --execute --local
 
 ## 路线图
 
-1. 补齐 FastAPI service-client 的自动化测试
-2. 增加任务状态、执行历史和取消接口
+1. 补齐 FastAPI service-client 与任务管理的自动化测试
+2. 增加任务取消、重试和并发限制配置
 3. 在当前 JSON CLI 和 HTTP API 之上引入 MCP server
 4. 增加目录监听模式和可视化 workflow 编辑界面
 

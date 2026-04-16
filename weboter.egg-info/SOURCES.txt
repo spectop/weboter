@@ -12,6 +12,7 @@ weboter.egg-info/top_level.txt
 weboter/app/client.py
 weboter/app/server.py
 weboter/app/service.py
+weboter/app/task_manager.py
 weboter/builtin/__init__.py
 weboter/builtin/basic_action.py
 weboter/builtin/basic_control.py

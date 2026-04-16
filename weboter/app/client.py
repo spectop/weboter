@@ -1,10 +1,15 @@
 import json
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 from weboter.app.service import ServiceState, WorkflowService
+
+
+TERMINAL_TASK_STATUSES = {"succeeded", "failed"}
 
 
 class ServiceClientError(RuntimeError):
@@ -48,6 +53,10 @@ class WorkflowServiceClient:
     def health(self) -> dict[str, Any]:
         return self._request("GET", "/health")
 
+    def service_logs(self, lines: int = 200) -> dict[str, Any]:
+        query = urllib.parse.urlencode({"lines": lines})
+        return self._request("GET", f"/service/logs?{query}")
+
     def upload_workflow(self, source: Path, execute: bool = False) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -72,3 +81,24 @@ class WorkflowServiceClient:
                 "execute": execute,
             },
         )
+
+    def list_tasks(self, limit: int = 20) -> dict[str, Any]:
+        query = urllib.parse.urlencode({"limit": limit})
+        return self._request("GET", f"/tasks?{query}")
+
+    def get_task(self, task_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/tasks/{task_id}")
+
+    def get_task_logs(self, task_id: str, lines: int = 200) -> dict[str, Any]:
+        query = urllib.parse.urlencode({"lines": lines})
+        return self._request("GET", f"/tasks/{task_id}/logs?{query}")
+
+    def wait_for_task(self, task_id: str, timeout: float | None = None, interval: float = 0.5) -> dict[str, Any]:
+        deadline = None if timeout is None or timeout <= 0 else time.time() + timeout
+        while True:
+            task = self.get_task(task_id)
+            if task.get("status") in TERMINAL_TASK_STATUSES:
+                return task
+            if deadline is not None and time.time() >= deadline:
+                raise ServiceClientError(f"wait task timeout: {task_id}")
+            time.sleep(interval)
