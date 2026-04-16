@@ -9,7 +9,9 @@ description = "Config-driven browser workflow automation"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "fastapi>=0.116.0",
   "playwright>=1.57.0",
+  "uvicorn>=0.35.0",
 ]
 
 [project.optional-dependencies]

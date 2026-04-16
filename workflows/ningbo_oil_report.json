@@ -1,0 +1,82 @@
+{
+  "id": "ningbo_oil_report",
+  "name": "宁波92号汽油报告",
+  "description": "抓取宁波92号汽油页面并生成测试报告",
+  "start_node_id": "fetch_page",
+  "nodes": [
+    {
+      "id": "fetch_page",
+      "name": "抓取页面源码",
+      "description": "通过 HTTP 获取目标页面 HTML",
+      "action": "builtin.FetchUrl",
+      "inputs": {
+        "url": "https://www.icauto.com.cn/oil/price_330200_2.html",
+        "timeout": 20
+      },
+      "outputs": [
+        {
+          "src": "content",
+          "name": "html",
+          "pos": "flow"
+        },
+        {
+          "src": "final_url",
+          "name": "page_url",
+          "pos": "flow"
+        }
+      ],
+      "control": "builtin.NextNode",
+      "params": {
+        "next_node": "build_report"
+      },
+      "log": "short"
+    },
+    {
+      "id": "build_report",
+      "name": "生成报告内容",
+      "description": "从 HTML 中提取油价信息并组装 markdown 报告",
+      "action": "builtin.PyEvalAction",
+      "inputs": {
+        "expr": "(lambda html, final_url: (lambda re, html_mod, dt, title, summary_html, price: f'# {title}\\n\\n- 报告网址: https://www.icauto.com.cn/oil/price_330200_2.html\\n- 最终访问地址: {final_url}\\n- 当前价格: {price} 元/升\\n- 页面摘要: {re.sub(r\"<.*?>\", \"\", html_mod.unescape(summary_html)).strip()}\\n- 报告生成时间: {dt.datetime.now().isoformat(timespec=\"seconds\")}\\n')( __import__(\"re\"), __import__(\"html\"), __import__(\"datetime\"), __import__(\"re\").search(r\"<h1>(.*?)</h1>\", html, __import__(\"re\").S).group(1), __import__(\"re\").search(r\"<h2>宁波92号汽油最新价格\\(今日油价\\)</h2>.*?<p class=\\\"oildesc\\\">.*?</p>\\s*<p>(.*?)</p>\", html, __import__(\"re\").S).group(1), __import__(\"re\").search(r\"id=\\\"myTargetElement\\\">([0-9.]+)</span>\", html).group(1) ))(param1, param2)",
+        "param1": "$flow{html}",
+        "param2": "$flow{page_url}"
+      },
+      "outputs": [
+        {
+          "src": "result",
+          "name": "report_content",
+          "pos": "flow"
+        }
+      ],
+      "control": "builtin.NextNode",
+      "params": {
+        "next_node": "write_report"
+      },
+      "log": "short"
+    },
+    {
+      "id": "write_report",
+      "name": "写入报告文件",
+      "description": "将提取结果写入 markdown 报告",
+      "action": "builtin.WriteTextFile",
+      "inputs": {
+        "path": "reports/ningbo_oil_report.md",
+        "content": "$flow{report_content}"
+      },
+      "outputs": [
+        {
+          "src": "path",
+          "name": "report_path",
+          "pos": "flow"
+        }
+      ],
+      "control": "builtin.NextNode",
+      "params": {
+        "next_node": "__end__"
+      },
+      "log": "short"
+    }
+  ],
+  "sub_flows": [],
+  "log": "short"
+}

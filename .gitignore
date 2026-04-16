@@ -1,6 +1,8 @@
 workflows/*
 !workflows/demo_empty.json
+!workflows/ningbo_oil_report.json
 .weboter/
+reports/
 .venv/
 __pycache__/
 *.pyc

@@ -34,14 +34,16 @@
 5. 新增 `workflows/demo_empty.json` 作为本地最小验证样例
 6. 移除 `workflows/sgcc.json`
 7. 固定本地 service 数据目录语义，并为 CLI 增加稳定错误输出
+8. 增加常驻后台 service 与 CLI client 调用链路
+9. 将 service 传输层切换为 FastAPI/uvicorn，并补充机器可读的 JSON CLI 输出
 
 ## 下一阶段任务
 
-1. 为 `WorkflowService` 增加自动化测试
-2. 补充执行失败时的退出码和错误输出规范
-3. 设计 workflow 元数据接口，支持列举、查看和校验
+1. 为 FastAPI service-client 与 `WorkflowService` 增加自动化测试
+2. 设计 workflow 元数据接口，支持列举、查看和校验
+3. 为后台 service 增加任务状态、执行历史和取消接口
 4. 引入目录监听能力，支持后续自动监控模式
-5. 评估是否需要将运行入口升级为常驻进程或 HTTP service
+5. 在当前 service API 之上封装 MCP server，而不是让 MCP 解析 CLI 文本输出
 
 ## 验证基线
 
