@@ -17,6 +17,7 @@ class Executor:
         self.control_manager = control_manager
         
         logger = kwargs.get("logger", None)
+        self.hooks = kwargs.get("hooks")
         if logger and isinstance(logger, logging.Logger):
             self.logger = logger
         else:
@@ -37,6 +38,12 @@ class Executor:
             self.logger.addHandler(handler)
 
         self.logger.info(f">> Workflow '{flow.name}' loaded with {len(flow.nodes)} nodes and {len(flow.sub_flows)} sub-flows")
+        if self.hooks and hasattr(self.hooks, "on_workflow_loaded"):
+            import asyncio
+            maybe_coro = self.hooks.on_workflow_loaded(self, flow)
+            if asyncio.iscoroutine(maybe_coro):
+                # load_workflow may be called before any event loop exists.
+                pass
 
     def extract_outputs(self, node: Node, io: IOPipeImpl):
         pw_inst = io.outputs.get('__pw_inst__', None)
@@ -123,6 +130,8 @@ class Executor:
 
         self.logger.info("")
         self.logger.info(f"=> Executing node '{node.name}' (ID: {node.node_id})")
+        if self.hooks and hasattr(self.hooks, "before_step"):
+            await self.hooks.before_step(self, node)
         
         if node.action:
             action_io = self.prepare_action_io(node)
@@ -150,15 +159,30 @@ class Executor:
         self.logger.info(f"   Next node: '{self.runtime.get_node_name(next_node_id)}' (ID: {next_node_id})")
         self.runtime.set_current_node(next_node_id)
         self.runtime.switch_outputs()
+        if self.hooks and hasattr(self.hooks, "after_step"):
+            await self.hooks.after_step(self, node, next_node_id)
     
     async def run(self):
         if not self.workflow:
             raise ValueError("No workflow loaded")
         if not self.workflow.start_node_id:
             raise ValueError("Workflow has no start node defined")
+
+        if self.hooks and hasattr(self.hooks, "on_workflow_loaded"):
+            await self.hooks.on_workflow_loaded(self, self.workflow)
         
         while not self.runtime.finished():
-            await self.step_one()
+            try:
+                await self.step_one()
+            except Exception as exc:
+                if self.hooks and hasattr(self.hooks, "on_error"):
+                    handled = await self.hooks.on_error(self, exc)
+                    if handled:
+                        continue
+                raise
+
+        if self.hooks and hasattr(self.hooks, "on_finished"):
+            await self.hooks.on_finished(self)
 
     def get_subflow(self, flow_id: str) -> Flow:
         if not self.workflow:
@@ -175,7 +199,7 @@ class Executor:
 
         self.logger.info(f'   Starting sub flow with ID: {flow_id} >>>>>>>>')
         self.logger.info('')
-        executor = Executor(logger=self.logger)
+        executor = Executor(logger=self.logger, hooks=self.hooks)
         flow = self.get_subflow(flow_id)
         if not flow:
             raise ValueError(f"Sub flow '{flow_id}' not found")

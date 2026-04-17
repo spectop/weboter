@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "weboter": {
+      "command": "python",
+      "args": [
+        "-m",
+        "weboter.mcp.server"
+      ],
+      "env": {
+        "WEBOTER_SERVICE_URL": "http://127.0.0.1:8765",
+        "WEBOTER_API_TOKEN": "replace-me",
+        "WEBOTER_MCP_PROFILE": "operator"
+      }
+    }
+  }
+}

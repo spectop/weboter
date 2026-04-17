@@ -12,6 +12,8 @@ weboter.egg-info/top_level.txt
 weboter/app/client.py
 weboter/app/server.py
 weboter/app/service.py
+weboter/app/session.py
+weboter/app/state.py
 weboter/app/task_manager.py
 weboter/builtin/__init__.py
 weboter/builtin/basic_action.py
@@ -27,6 +29,8 @@ weboter/core/engine/io_pipe_impl.py
 weboter/core/engine/job.py
 weboter/core/engine/runtime.py
 weboter/core/engine/scheduler.py
+weboter/mcp/__init__.py
+weboter/mcp/server.py
 weboter/public/__init__.py
 weboter/public/contracts/__init__.py
 weboter/public/contracts/action.py

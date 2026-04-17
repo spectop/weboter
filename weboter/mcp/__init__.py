@@ -1,0 +1,1 @@
+"""Weboter MCP adapter package."""

@@ -10,3 +10,6 @@ __pycache__/
 .idea/
 .env
 .test/
+build/
+dist/
+*.egg-info/

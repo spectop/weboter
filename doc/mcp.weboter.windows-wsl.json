@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "weboter": {
+      "command": "C:\\Windows\\System32\\wsl.exe",
+      "args": [
+        "-d",
+        "Debian",
+        "bash",
+        "-lc",
+        "cd /path/to/weboter && . .venv/bin/activate && WEBOTER_SERVICE_URL=http://127.0.0.1:8765 WEBOTER_MCP_PROFILE=operator python -m weboter.mcp.server"
+      ]
+    }
+  }
+}

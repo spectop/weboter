@@ -9,6 +9,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
+from weboter.app.session import ExecutionSessionManager
 from weboter.app.service import WorkflowService
 
 
@@ -22,6 +23,7 @@ TERMINAL_TASK_STATUSES = {TASK_STATUS_SUCCEEDED, TASK_STATUS_FAILED}
 @dataclass
 class TaskRecord:
     task_id: str
+    session_id: str
     workflow_path: str
     workflow_name: str
     status: str
@@ -38,10 +40,12 @@ class TaskManager:
         self,
         workflow_service: WorkflowService,
         system_logger: logging.Logger,
+        session_manager: ExecutionSessionManager | None = None,
         max_workers: int = 2,
     ):
         self.workflow_service = workflow_service
         self.system_logger = system_logger
+        self.session_manager = session_manager
         self.task_root = self.workflow_service.data_root / "tasks"
         self.task_root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
@@ -52,6 +56,7 @@ class TaskManager:
         log_path = self.task_root / f"{task_id}.log"
         record = TaskRecord(
             task_id=task_id,
+            session_id=task_id,
             workflow_path=str(workflow_path),
             workflow_name=workflow_path.stem,
             status=TASK_STATUS_QUEUED,
@@ -59,6 +64,8 @@ class TaskManager:
             created_at=self._now(),
             log_path=str(log_path),
         )
+        if self.session_manager is not None:
+            self.session_manager.create_session(task_id, workflow_path, workflow_path.stem, log_path)
         self._save(record)
         self.system_logger.info("任务已创建: %s -> %s", task_id, workflow_path)
         self._executor.submit(self._run_task, task_id)
@@ -110,10 +117,16 @@ class TaskManager:
             record.started_at = self._now()
             self._save(record)
             self.system_logger.info("任务开始执行: %s", task_id)
-            self.workflow_service.run_workflow(Path(record.workflow_path), logger=logger)
+            hooks = None
+            if self.session_manager is not None:
+                live_session = self.session_manager.get_live_session(task_id)
+                hooks = live_session.create_hooks() if live_session is not None else None
+            self.workflow_service.run_workflow(Path(record.workflow_path), logger=logger, hooks=hooks)
             record.status = TASK_STATUS_SUCCEEDED
             record.finished_at = self._now()
             self._save(record)
+            if self.session_manager is not None:
+                self.session_manager.mark_session_finished(task_id, True)
             self.system_logger.info("任务执行成功: %s", task_id)
         except Exception as exc:
             logger.exception("任务执行失败")
@@ -121,6 +134,8 @@ class TaskManager:
             record.error = str(exc)
             record.finished_at = self._now()
             self._save(record)
+            if self.session_manager is not None:
+                self.session_manager.mark_session_finished(task_id, False, str(exc))
             self.system_logger.exception("任务执行失败: %s", task_id)
         finally:
             logger.removeHandler(file_handler)
@@ -149,7 +164,10 @@ class TaskManager:
 
     def _load_from_file(self, task_file: Path) -> TaskRecord:
         with open(task_file, "r", encoding="utf-8") as file_obj:
-            return TaskRecord(**json.load(file_obj))
+            data = json.load(file_obj)
+        if "session_id" not in data or not data.get("session_id"):
+            data["session_id"] = data.get("task_id")
+        return TaskRecord(**data)
 
     @staticmethod
     def _tail_text(path: Path, lines: int) -> str:

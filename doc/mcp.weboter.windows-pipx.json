@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "weboter": {
+      "command": "pipx",
+      "args": [
+        "run",
+        "--spec",
+        "C:\\path\\to\\dist\\weboter-0.1.2-py3-none-any.whl",
+        "weboter-mcp"
+      ],
+      "env": {
+        "WEBOTER_SERVICE_URL": "http://127.0.0.1:8765",
+        "WEBOTER_MCP_PROFILE": "operator"
+      }
+    }
+  }
+}

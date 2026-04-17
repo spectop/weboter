@@ -2,11 +2,11 @@ import asyncio
 from dataclasses import asdict, dataclass
 import json
 import logging
-import os
 from pathlib import Path
 import shutil
 from typing import Any
 
+from weboter.app.state import ServiceState, default_workspace_root
 from weboter.core.bootstrap import ensure_builtin_packages_registered
 from weboter.core.engine.excutor import Executor
 from weboter.core.workflow_io import WorkflowReader
@@ -17,21 +17,9 @@ class WorkflowResolution:
     source_path: Path
     managed_path: Path | None = None
 
-
-@dataclass
-class ServiceState:
-    host: str
-    port: int
-    pid: int
-    workspace_root: str
-    log_path: str
-    started_at: str
-
-
 class WorkflowService:
     def __init__(self, workspace_root: Path | None = None):
-        default_root = Path(os.environ.get("WEBOTER_HOME", Path(__file__).resolve().parents[2]))
-        self.workspace_root = (workspace_root or default_root).resolve()
+        self.workspace_root = (workspace_root or default_workspace_root()).resolve()
         self.data_root = self.workspace_root / ".weboter"
         self.workflow_store = self.data_root / "workflows"
         self.workflow_store.mkdir(parents=True, exist_ok=True)
@@ -76,33 +64,40 @@ class WorkflowService:
             shutil.copy2(source_path, destination)
         return WorkflowResolution(source_path=destination, managed_path=destination)
 
+    def _workflow_name_from_path(self, directory: Path, workflow_path: Path) -> str:
+        relative_path = workflow_path.relative_to(directory.expanduser().resolve())
+        return ".".join(relative_path.with_suffix("").parts)
+
+    def _workflow_path_from_name(self, directory: Path, workflow_name: str) -> Path:
+        name_parts = [part for part in workflow_name.split(".") if part]
+        if not name_parts:
+            raise ValueError("Workflow name cannot be empty")
+        return directory.expanduser().resolve().joinpath(*name_parts).with_suffix(".json")
+
     def resolve_from_directory(self, directory: Path, workflow_name: str | None = None) -> WorkflowResolution:
         directory_path = directory.expanduser().resolve()
         if not directory_path.is_dir():
             raise NotADirectoryError(f"Workflow directory not found: {directory_path}")
 
         if workflow_name:
-            candidates = [
-                directory_path / workflow_name,
-                directory_path / f"{workflow_name}.json",
-            ]
-            for candidate in candidates:
-                if candidate.is_file():
-                    return WorkflowResolution(source_path=candidate)
+            candidate = self._workflow_path_from_name(directory_path, workflow_name)
+            if candidate.is_file():
+                return WorkflowResolution(source_path=candidate)
             raise FileNotFoundError(f"Workflow '{workflow_name}' not found in: {directory_path}")
 
-        json_files = sorted(directory_path.glob("*.json"))
+        json_files = sorted(directory_path.rglob("*.json"))
         if len(json_files) != 1:
             raise ValueError(
                 "Directory mode requires exactly one workflow file, or use --name to choose one"
             )
         return WorkflowResolution(source_path=json_files[0])
 
-    def list_directory_workflows(self, directory: Path) -> list[Path]:
+    def list_directory_workflows(self, directory: Path) -> list[str]:
         directory_path = directory.expanduser().resolve()
         if not directory_path.is_dir():
             raise NotADirectoryError(f"Workflow directory not found: {directory_path}")
-        return sorted(directory_path.glob("*.json"))
+        workflow_paths = sorted(directory_path.rglob("*.json"))
+        return [self._workflow_name_from_path(directory_path, workflow_path) for workflow_path in workflow_paths]
 
     def delete_workflow(self, directory: Path, workflow_name: str | None = None) -> Path:
         resolution = self.resolve_from_directory(directory, workflow_name)
@@ -112,10 +107,10 @@ class WorkflowService:
         workflow_path.unlink()
         return workflow_path
 
-    def run_workflow(self, workflow_path: Path, logger: logging.Logger | None = None) -> Path:
+    def run_workflow(self, workflow_path: Path, logger: logging.Logger | None = None, hooks: Any | None = None) -> Path:
         ensure_builtin_packages_registered()
         flow = WorkflowReader.from_json(workflow_path)
-        executor = Executor(logger=logger)
+        executor = Executor(logger=logger, hooks=hooks)
         executor.load_workflow(flow)
         asyncio.run(executor.run())
         return workflow_path
@@ -140,7 +135,7 @@ class WorkflowService:
     ) -> dict[str, Any]:
         if list_only:
             workflows = self.list_directory_workflows(directory)
-            return {"items": [str(item) for item in workflows]}
+            return {"items": workflows}
 
         if delete:
             deleted_path = self.delete_workflow(directory, workflow_name)

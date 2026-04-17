@@ -9,11 +9,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel
+from starlette.responses import JSONResponse
 import uvicorn
 
 from weboter.app.client import ServiceClientError, WorkflowServiceClient
+from weboter.app.session import ExecutionSessionManager
 from weboter.app.service import WorkflowService
 from weboter.app.task_manager import TERMINAL_TASK_STATUSES, TaskManager
 
@@ -33,6 +35,48 @@ class WorkflowDirectoryRequest(BaseModel):
     list: bool = False
     delete: bool = False
     execute: bool = False
+
+
+class SessionSetContextRequest(BaseModel):
+    key: str
+    value: Any
+
+
+class SessionJumpRequest(BaseModel):
+    node_id: str
+
+
+class SessionPatchNodeRequest(BaseModel):
+    node_id: str
+    patch: dict[str, Any]
+
+
+class SessionAddNodeRequest(BaseModel):
+    node: dict[str, Any]
+
+
+class SessionExportWorkflowRequest(BaseModel):
+    path: str
+
+
+class SessionPageEvaluateRequest(BaseModel):
+    script: str
+    arg: Any | None = None
+
+
+class SessionPageGotoRequest(BaseModel):
+    url: str
+
+
+class SessionPageClickRequest(BaseModel):
+    locator: str
+    timeout: int = 5000
+
+
+class SessionPageFillRequest(BaseModel):
+    locator: str
+    value: str
+    timeout: int = 5000
 
 
 def _configure_service_logger(workflow_service: WorkflowService) -> logging.Logger:
@@ -56,7 +100,9 @@ def _tail_file(path: Path, lines: int) -> str:
 def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     service = workflow_service or WorkflowService()
     system_logger = _configure_service_logger(service)
-    task_manager = TaskManager(service, system_logger)
+    session_manager = ExecutionSessionManager(service.data_root / "sessions", system_logger)
+    task_manager = TaskManager(service, system_logger, session_manager=session_manager)
+    api_token = os.environ.get("WEBOTER_API_TOKEN", "").strip()
     app = FastAPI(
         title="Weboter Local Service",
         version="0.1.0",
@@ -65,6 +111,65 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     app.state.workflow_service = service
     app.state.system_logger = system_logger
     app.state.task_manager = task_manager
+    app.state.session_manager = session_manager
+
+    def _request_source(request: Request) -> str:
+        caller = request.headers.get("X-Weboter-Caller", "").strip()
+        if caller:
+            return caller
+        user_agent = request.headers.get("User-Agent", "").strip()
+        if user_agent:
+            return user_agent
+        return request.client.host if request.client else "unknown"
+
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next):
+        if not api_token:
+            return await call_next(request)
+
+        path = request.url.path
+        public_paths = {"/health", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
+        if path in public_paths or path.startswith("/docs"):
+            return await call_next(request)
+
+        provided = request.headers.get("X-Weboter-Token", "")
+        if provided != api_token:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def request_logging_middleware(request: Request, call_next):
+        started_at = time.time()
+        source = _request_source(request)
+        system_logger.info(
+            "HTTP request start source=%s method=%s path=%s query=%s",
+            source,
+            request.method,
+            request.url.path,
+            request.url.query,
+        )
+        try:
+            response = await call_next(request)
+        except Exception:
+            duration_ms = int((time.time() - started_at) * 1000)
+            system_logger.exception(
+                "HTTP request failed source=%s method=%s path=%s duration_ms=%s",
+                source,
+                request.method,
+                request.url.path,
+                duration_ms,
+            )
+            raise
+        duration_ms = int((time.time() - started_at) * 1000)
+        system_logger.info(
+            "HTTP request end source=%s method=%s path=%s status=%s duration_ms=%s",
+            source,
+            request.method,
+            request.url.path,
+            response.status_code,
+            duration_ms,
+        )
+        return response
 
     def _raise_http_error(exc: Exception) -> None:
         if isinstance(exc, (FileNotFoundError, NotADirectoryError, ValueError)):
@@ -113,9 +218,123 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
         except Exception as exc:
             _raise_http_error(exc)
 
+    @app.get("/sessions", tags=["session"])
+    def list_sessions(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
+        return {"items": [asdict(item) for item in session_manager.list_sessions(limit)]}
+
+    @app.get("/sessions/{session_id}", tags=["session"])
+    def get_session(session_id: str) -> dict[str, Any]:
+        try:
+            return asdict(session_manager.get_session(session_id))
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.get("/sessions/{session_id}/snapshots", tags=["session"])
+    def get_session_snapshots(session_id: str, limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
+        try:
+            return {"items": session_manager.get_snapshots(session_id, limit)}
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/pause", tags=["session"])
+    def pause_session(session_id: str) -> dict[str, Any]:
+        try:
+            return session_manager.request_pause(session_id)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/resume", tags=["session"])
+    def resume_session(session_id: str) -> dict[str, Any]:
+        try:
+            return session_manager.resume(session_id)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/abort", tags=["session"])
+    def abort_session(session_id: str) -> dict[str, Any]:
+        try:
+            return session_manager.abort(session_id)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/context", tags=["session"])
+    def session_set_context(session_id: str, payload: SessionSetContextRequest) -> dict[str, Any]:
+        try:
+            return session_manager.set_context(session_id, payload.key, payload.value)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/jump", tags=["session"])
+    def session_jump(session_id: str, payload: SessionJumpRequest) -> dict[str, Any]:
+        try:
+            return session_manager.jump_to_node(session_id, payload.node_id)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/patch-node", tags=["session"])
+    def session_patch_node(session_id: str, payload: SessionPatchNodeRequest) -> dict[str, Any]:
+        try:
+            return session_manager.patch_node(session_id, payload.node_id, payload.patch)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/add-node", tags=["session"])
+    def session_add_node(session_id: str, payload: SessionAddNodeRequest) -> dict[str, Any]:
+        try:
+            return session_manager.add_node(session_id, payload.node)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/export-workflow", tags=["session"])
+    def session_export_workflow(session_id: str, payload: SessionExportWorkflowRequest) -> dict[str, Any]:
+        try:
+            return session_manager.export_workflow(session_id, payload.path)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.get("/sessions/{session_id}/page", tags=["session"])
+    def session_page_snapshot(session_id: str) -> dict[str, Any]:
+        try:
+            return session_manager.page_snapshot(session_id)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/page/evaluate", tags=["session"])
+    def session_page_evaluate(session_id: str, payload: SessionPageEvaluateRequest) -> Any:
+        try:
+            return {"result": session_manager.page_evaluate(session_id, payload.script, payload.arg)}
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/page/goto", tags=["session"])
+    def session_page_goto(session_id: str, payload: SessionPageGotoRequest) -> dict[str, Any]:
+        try:
+            return session_manager.page_goto(session_id, payload.url)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/page/click", tags=["session"])
+    def session_page_click(session_id: str, payload: SessionPageClickRequest) -> dict[str, Any]:
+        try:
+            return session_manager.page_click(session_id, payload.locator, payload.timeout)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/page/fill", tags=["session"])
+    def session_page_fill(session_id: str, payload: SessionPageFillRequest) -> dict[str, Any]:
+        try:
+            return session_manager.page_fill(session_id, payload.locator, payload.value, payload.timeout)
+        except Exception as exc:
+            _raise_http_error(exc)
+
     @app.post("/workflow/upload", tags=["workflow"])
     def workflow_upload(payload: WorkflowUploadRequest) -> dict[str, Any]:
         try:
+            system_logger.info(
+                "workflow upload path=%s execute=%s",
+                payload.path,
+                payload.execute,
+            )
             if not payload.execute:
                 return service.handle_upload_request(Path(payload.path), False)
             resolution = service.upload_workflow(Path(payload.path))
@@ -130,6 +349,14 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     @app.post("/workflow/dir", tags=["workflow"])
     def workflow_dir(payload: WorkflowDirectoryRequest) -> dict[str, Any]:
         try:
+            system_logger.info(
+                "workflow dir directory=%s name=%s list=%s delete=%s execute=%s",
+                payload.directory,
+                payload.name,
+                payload.list,
+                payload.delete,
+                payload.execute,
+            )
             if payload.list:
                 return service.handle_directory_request(Path(payload.directory), payload.name, True, False, False)
             if payload.delete:
@@ -214,7 +441,7 @@ def start_background_service(
                 sys.executable,
                 "-m",
                 "weboter",
-                "serve",
+                "service",
                 "start",
                 "--foreground",
                 "--host",

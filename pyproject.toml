@@ -4,17 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weboter"
-version = "0.1.0"
+version = "0.1.2"
 description = "Config-driven browser workflow automation"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "mcp>=1.27.0",
+]
+
+[project.optional-dependencies]
+service = [
   "fastapi>=0.116.0",
   "playwright>=1.57.0",
   "uvicorn>=0.35.0",
 ]
-
-[project.optional-dependencies]
 browser = [
   "playwright-stealth>=2.0.0",
 ]
@@ -25,6 +28,7 @@ captcha = [
 
 [project.scripts]
 weboter = "weboter.cli:main"
+weboter-mcp = "weboter.mcp.server:main"
 
 [tool.setuptools]
 include-package-data = true

@@ -23,7 +23,7 @@
 1. 用户可以手动上传单个 workflow 文件
 2. 用户可以指定一个 workflow 目录进行解析和执行
 3. 基础 workflow 可以在 Linux/WSL 环境稳定运行
-4. 不依赖 `sgcc.json` 或任何敏感测试数据
+4. 不依赖敏感测试数据或可能引发站点纠纷的示例 workflow
 
 ## 已完成
 
@@ -32,7 +32,7 @@
 3. 增加 builtin 注册引导，避免 CLI 与执行器之间缺少装配
 4. 让验证码能力退化为可选依赖，基础 workflow 不再被阻塞
 5. 新增 `workflows/demo_empty.json` 作为本地最小验证样例
-6. 移除 `workflows/sgcc.json`
+6. 移除历史敏感 workflow 示例
 7. 固定本地 service 数据目录语义，并为 CLI 增加稳定错误输出
 8. 增加常驻后台 service 与 CLI client 调用链路
 9. 将 service 传输层切换为 FastAPI/uvicorn，并补充机器可读的 JSON CLI 输出

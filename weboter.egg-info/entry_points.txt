@@ -1,2 +1,3 @@
 [console_scripts]
 weboter = weboter.cli:main
+weboter-mcp = weboter.mcp.server:main

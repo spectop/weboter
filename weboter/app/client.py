@@ -1,12 +1,19 @@
+from __future__ import annotations
+
 import json
+import os
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
 
-from weboter.app.service import ServiceState, WorkflowService
+from weboter.app.state import ServiceState, default_service_state_path, load_service_state
+
+if TYPE_CHECKING:
+    from weboter.app.service import WorkflowService
 
 
 TERMINAL_TASK_STATUSES = {"succeeded", "failed"}
@@ -17,21 +24,53 @@ class ServiceClientError(RuntimeError):
 
 
 class WorkflowServiceClient:
-    def __init__(self, workflow_service: WorkflowService | None = None):
-        self.workflow_service = workflow_service or WorkflowService()
+    def __init__(
+        self,
+        workflow_service: WorkflowService | None = None,
+        base_url: str | None = None,
+        api_token: str | None = None,
+        caller_name: str | None = None,
+        workspace_root: Path | None = None,
+        state_path: Path | None = None,
+    ):
+        self.workflow_service = workflow_service
+        self.base_url = base_url.rstrip("/") if base_url else None
+        self.api_token = api_token if api_token is not None else os.environ.get("WEBOTER_API_TOKEN")
+        self.caller_name = caller_name or os.environ.get("WEBOTER_CALLER_NAME", "")
+        self.state_path = (state_path or default_service_state_path(workspace_root)).expanduser().resolve()
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
+    def _serialize_service_path(self, path: Path | str) -> str:
+        if self.base_url:
+            if isinstance(path, Path):
+                return path.as_posix()
+            return path
+        target = Path(path) if not isinstance(path, Path) else path
+        if self.base_url:
+            return str(target)
+        return str(target.expanduser().resolve())
+
     def _load_state(self) -> ServiceState:
-        state = self.workflow_service.read_service_state()
+        if self.workflow_service is not None:
+            state = self.workflow_service.read_service_state()
+        else:
+            state = load_service_state(self.state_path)
         if state is None:
-            raise ServiceClientError("service 未启动，请先执行 `weboter serve start`")
+            raise ServiceClientError("service 未启动，请先执行 `weboter service start`")
         return state
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        state = self._load_state()
-        url = f"http://{state.host}:{state.port}{path}"
+        if self.base_url:
+            url = f"{self.base_url}{path}"
+        else:
+            state = self._load_state()
+            url = f"http://{state.host}:{state.port}{path}"
         data = None
         headers = {}
+        if self.api_token:
+            headers["X-Weboter-Token"] = self.api_token
+        if self.caller_name:
+            headers["X-Weboter-Caller"] = self.caller_name
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -48,7 +87,7 @@ class WorkflowServiceClient:
                 message = str(exc)
             raise ServiceClientError(message) from exc
         except urllib.error.URLError as exc:
-            raise ServiceClientError("service 不可用，请检查 `weboter serve status`") from exc
+            raise ServiceClientError("service 不可用，请检查 `weboter service status`") from exc
 
     def health(self) -> dict[str, Any]:
         return self._request("GET", "/health")
@@ -57,16 +96,19 @@ class WorkflowServiceClient:
         query = urllib.parse.urlencode({"lines": lines})
         return self._request("GET", f"/service/logs?{query}")
 
+    def service_state(self) -> dict[str, Any]:
+        return self._request("GET", "/service/state")
+
     def upload_workflow(self, source: Path, execute: bool = False) -> dict[str, Any]:
         return self._request(
             "POST",
             "/workflow/upload",
-            {"path": str(source.expanduser().resolve()), "execute": execute},
+            {"path": self._serialize_service_path(source), "execute": execute},
         )
 
     def handle_directory(
         self,
-        directory: Path,
+        directory: Path | str,
         workflow_name: str | None = None,
         list_only: bool = False,
         delete: bool = False,
@@ -76,7 +118,7 @@ class WorkflowServiceClient:
             "POST",
             "/workflow/dir",
             {
-                "directory": str(directory.expanduser().resolve()),
+                "directory": self._serialize_service_path(directory),
                 "name": workflow_name,
                 "list": list_only,
                 "delete": delete,
@@ -94,6 +136,56 @@ class WorkflowServiceClient:
     def get_task_logs(self, task_id: str, lines: int = 200) -> dict[str, Any]:
         query = urllib.parse.urlencode({"lines": lines})
         return self._request("GET", f"/tasks/{task_id}/logs?{query}")
+
+    def list_sessions(self, limit: int = 20) -> dict[str, Any]:
+        query = urllib.parse.urlencode({"limit": limit})
+        return self._request("GET", f"/sessions?{query}")
+
+    def get_session(self, session_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/sessions/{session_id}")
+
+    def get_session_snapshots(self, session_id: str, limit: int = 20) -> dict[str, Any]:
+        query = urllib.parse.urlencode({"limit": limit})
+        return self._request("GET", f"/sessions/{session_id}/snapshots?{query}")
+
+    def pause_session(self, session_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/pause", {})
+
+    def resume_session(self, session_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/resume", {})
+
+    def abort_session(self, session_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/abort", {})
+
+    def set_session_context(self, session_id: str, key: str, value: Any) -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/context", {"key": key, "value": value})
+
+    def jump_session_node(self, session_id: str, node_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/jump", {"node_id": node_id})
+
+    def patch_session_node(self, session_id: str, node_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/patch-node", {"node_id": node_id, "patch": patch})
+
+    def add_session_node(self, session_id: str, node: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/add-node", {"node": node})
+
+    def export_session_workflow(self, session_id: str, path: str) -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/export-workflow", {"path": path})
+
+    def get_session_page(self, session_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/sessions/{session_id}/page")
+
+    def evaluate_session_page(self, session_id: str, script: str, arg: Any = None) -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/page/evaluate", {"script": script, "arg": arg})
+
+    def session_page_goto(self, session_id: str, url: str) -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/page/goto", {"url": url})
+
+    def session_page_click(self, session_id: str, locator: str, timeout: int = 5000) -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/page/click", {"locator": locator, "timeout": timeout})
+
+    def session_page_fill(self, session_id: str, locator: str, value: str, timeout: int = 5000) -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/page/fill", {"locator": locator, "value": value, "timeout": timeout})
 
     def wait_for_task(self, task_id: str, timeout: float | None = None, interval: float = 0.5) -> dict[str, Any]:
         deadline = None if timeout is None or timeout <= 0 else time.time() + timeout
