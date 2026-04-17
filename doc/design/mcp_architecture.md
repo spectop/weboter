@@ -4,6 +4,12 @@
 
 本阶段的目标不是把 MCP 直接嵌进执行器，而是建立一套稳定的远程控制面，让 agent 能在执行会话中观察、介入、修改并导出 workflow，同时保留权限边界。
 
+## 统一叫法
+
+- `weboter service`：唯一执行面，负责 workflow 执行、任务管理、会话管理、日志与数据落盘
+- `weboter client`：通过命令行或脚本直接调用 service 的部分，例如 `weboter service ...`、`weboter workflow ...`、`WorkflowServiceClient`
+- `weboter mcp`：提供给 LLM / agent 使用的 MCP 入口，当前对应 `weboter-mcp` 或 `python -m weboter.mcp.server`
+
 ## 分层
 
 整体分为三层：
@@ -14,16 +20,50 @@
    - 提供暂停、恢复、上下文修改、节点跳转、节点补丁、页面操作的执行入口
    - 在异常时进入 `guard_waiting` 状态，保留第一现场
 
-2. Weboter Service 控制面
+2. `weboter service` 控制面
    - 基于 FastAPI 暴露任务、会话、日志和页面控制接口
    - session 相关能力通过 HTTP API 远程调用
     - 自身的监听地址、工作目录和鉴权由 service 侧独立决定
 
-3. MCP Adapter
+3. `weboter mcp`
    - 基于官方 Python `mcp` SDK 的 `FastMCP`
    - 默认使用 `stdio` 作为 MCP client 到 adapter 的传输方式
     - adapter 只通过 `WEBOTER_SERVICE_URL` / `WEBOTER_MCP_SERVICE_URL` 连接目标 service
-   - 因此 agent 与 Weboter service 可以不在同一环境
+   - 因此 agent 与 `weboter service` 可以不在同一环境
+
+## 结构图
+
+```mermaid
+flowchart LR
+  agent[LLM / Agent\n内置 MCP Client]
+  mcp_cli[weboter mcp\nweboter-mcp / python -m weboter.mcp.server]
+  client[weboter client\nCLI / WorkflowServiceClient]
+
+  subgraph service_box[weboter service]
+    service_api[FastAPI / Auth boundary]
+    workflow_service[WorkflowService]
+    task_manager[TaskManager]
+    session_manager[ExecutionSessionManager]
+    executor[Executor / Playwright runtime]
+    data_root[data root]
+  end
+
+  mcp_srv[mcp_srv\n可选 / 预留]
+
+  agent <-->|MCP stdio| mcp_cli
+  mcp_cli -->|HTTP JSON + Token| service_api
+  client -->|HTTP JSON + Token| service_api
+  mcp_srv -.->|若后续启用，也应复用同一 service 边界| service_api
+
+  service_api --> workflow_service
+  service_api --> task_manager
+  service_api --> session_manager
+  task_manager --> executor
+  session_manager --> executor
+  workflow_service --> data_root
+  task_manager --> data_root
+  session_manager --> data_root
+```
 
 ## 执行介入模型
 
@@ -85,28 +125,28 @@
 
 ## 远程传输说明
 
-`stdio` 只用于 MCP client 与 adapter 进程之间。
+`stdio` 只用于 MCP client 与 `weboter mcp` 进程之间。
 
 真正的跨环境调用链是：
 
-`Agent -> stdio MCP adapter -> HTTP Weboter service -> ExecutionSession`
+`LLM / Agent -> weboter mcp -> HTTP weboter service -> ExecutionSession`
 
-因此只要 MCP adapter 能访问 `WEBOTER_SERVICE_URL` 指向的 service，agent 和 service 就不必部署在同一环境。
+因此只要 `weboter mcp` 能访问 `WEBOTER_SERVICE_URL` 指向的 service，agent 和 service 就不必部署在同一环境。
 
 ## 客户端启动面的拆分结论
 
-从客户端启动 MCP 的角度，问题的关键不是“要不要再造一个新的 `mcp-srv` 进程”，而是“不要让 stdio adapter 带上执行端依赖”。
+从客户端启动 MCP 的角度，问题的关键不是“要不要再造一个新的 `mcp-srv` 进程”，而是“不要让 `weboter mcp` 带上执行端依赖”。
 
 当前更合理的拆分是：
 
-- `weboter-mcp` 作为轻量 adapter，只保留 `mcp` 和 HTTP client 能力
+- `weboter mcp` 作为轻量 adapter，只保留 `mcp` 和 HTTP client 能力
 - `weboter service` 作为重执行面，持有 FastAPI、Playwright 和 workflow 运行时
 
 因此这里应该拆的是发布物和依赖面，而不是再额外引入一个新的重型 MCP server / CLI 双角色。
 
 如果后续真的需要继续拆分，也应优先考虑：
 
-- 单独发布轻量 `weboter-mcp` 包
+- 单独发布轻量 `weboter mcp` 包
 - 单独发布执行端 `weboter-service` 包
 
 而不是让客户端启动路径继续携带 Playwright 或浏览器安装逻辑。
@@ -115,7 +155,7 @@
 
 推荐使用如下 MCP 导入方式。
 
-如果 MCP client、Weboter service 和 `weboter` Python 包在同一个环境中，可以直接运行 module；下面这段 JSON 只负责启动 MCP adapter 并连接已启动的 service：
+如果 MCP client、`weboter service` 和 `weboter` Python 包在同一个环境中，可以直接运行 module；下面这段 JSON 只负责启动 `weboter mcp` 并连接已启动的 service：
 
 ```json
 {
@@ -137,7 +177,7 @@
 }
 ```
 
-如果 agent 跑在 Windows，而 Weboter 运行在 WSL 中，应改为通过 `wsl.exe` 进入 WSL 后再启动 MCP adapter。示例：
+如果 agent 跑在 Windows，而 Weboter 运行在 WSL 中，应改为通过 `wsl.exe` 进入 WSL 后再启动 `weboter mcp`。示例：
 
 ```json
 {
@@ -156,7 +196,7 @@
 }
 ```
 
-这条边界需要保持简单明确：service 如何启动、监听在哪、token 是什么，都由 service 自己负责；外部 MCP adapter 只拿 `WEBOTER_SERVICE_URL` 和可选 `WEBOTER_API_TOKEN` 进行连接。
+这条边界需要保持简单明确：`weboter service` 如何启动、监听在哪、token 是什么，都由 service 自己负责；`weboter mcp` 只拿 `WEBOTER_SERVICE_URL` 和可选 `WEBOTER_API_TOKEN` 进行连接。
 
 ## 后续可继续扩展的部分
 

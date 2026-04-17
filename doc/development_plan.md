@@ -51,11 +51,11 @@
 当前最小验证命令：
 
 ```bash
-python -m weboter serve start
+python -m weboter service start
 python -m weboter workflow --dir workflows --name demo_empty --execute --wait
 python -m weboter task list
-python -m weboter serve logs --lines 50
-python -m weboter serve stop
+python -m weboter service logs --lines 50
+python -m weboter service stop
 ```
 
 预期结果：
