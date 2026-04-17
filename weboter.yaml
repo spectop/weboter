@@ -1,0 +1,23 @@
+paths:
+  workspace_root: .
+  data_root: .weboter
+  workflow_store: workflows
+
+service:
+  host: 127.0.0.1
+  port: 34567
+  auth:
+    enabled: false
+    token:
+    show_secrets_once: true
+
+mcp:
+  service_url:
+  profile: operator
+  transport: stdio
+  caller_name: mcp
+
+client:
+  api_token:
+  caller_name: cli
+  request_timeout: 10

@@ -41,7 +41,19 @@ python -m pip install -e '.[service,browser]'
 python -m pip install -e '.[service,captcha]'
 ```
 
-默认情况下，本地 service 数据目录固定在仓库根目录下的 `.weboter/`。如果你希望改到其他位置，可以设置环境变量 `WEBOTER_HOME`。
+默认情况下，Weboter 会优先读取仓库根目录下的 `weboter.yaml` 作为统一配置文件；如果需要使用其他位置的配置文件，可以通过 `weboter --config /path/to/weboter.yaml ...` 指定。仓库根目录现在提供了一份默认样例 [weboter.yaml](weboter.yaml)。
+
+但对于 MCP 导入场景，推荐不要依赖配置文件，而是直接在 MCP JSON 里通过 `env` 传入少量连接参数。外部 `weboter-mcp` / `python -m weboter.mcp.server` 只负责连接已经启动的 Weboter service，不负责启动本地 service，也不依赖 service 的工作目录。
+
+当前建议通过配置文件统一管理这些运行时配置：
+
+- `paths.workspace_root`：工作区根目录
+- `paths.data_root`：service 状态、日志、secret 持久化目录
+- `paths.workflow_store`：service 托管 workflow 目录
+- `service.host` / `service.port`：service 监听地址与端口
+- `service.auth.enabled` / `service.auth.token`：是否启用接口鉴权以及固定 token
+- `mcp.service_url` / `mcp.profile` / `mcp.transport`：MCP adapter 连接的 service、权限档位和传输方式
+- `client.api_token` / `client.caller_name` / `client.request_timeout`：CLI / MCP client 的默认请求行为
 
 ## 使用
 
@@ -51,7 +63,7 @@ python -m pip install -e '.[service,captcha]'
 weboter service start
 ```
 
-默认会自动选择一个空闲本地端口，并把连接信息写入 `.weboter/service.json`，后续 `weboter workflow ...` 会自动按这个状态文件连接到后台 service。
+默认会自动选择一个空闲本地端口，并把连接信息写入 `.weboter/service.json`；如果你在 `weboter.yaml` 里固定了 `service.port`，则后续 CLI / MCP 会直接使用那组配置或这个状态文件。
 
 service 启动后会暴露：
 
@@ -156,14 +168,16 @@ weboter workflow --dir workflows --name demo_empty --execute --local
 
 当 service 已停止时，`weboter service logs`、`weboter task list` 和 `weboter task logs` 仍然会直接读取 `.weboter/` 下的本地历史文件，方便排查问题。
 
-如果希望启用 service 鉴权，可以在启动前设置：
+如果希望启用 service 鉴权，可以在 `weboter.yaml` 中打开：
 
-```bash
-export WEBOTER_API_TOKEN=replace-me
-weboter service start
+```yaml
+service:
+	auth:
+		enabled: true
+		token:
 ```
 
-此时除 `/health`、`/docs` 和 `/openapi.json` 外，其余接口都要求请求头 `X-Weboter-Token`。
+当 `service.auth.enabled: true` 且未手动填写 `token` 时，Weboter 会在第一次成功启动时自动生成 token，并在当前 Terminal 输出一次 secret 提示；之后不会重复显示。此时除 `/health`、`/docs` 和 `/openapi.json` 外，其余接口都要求请求头 `X-Weboter-Token`。
 
 ## 示例 workflow
 
@@ -197,19 +211,27 @@ weboter service start
 推荐的跨环境调用链是：
 
 1. Agent 通过 MCP client 拉起 `weboter.mcp.server`
-2. MCP adapter 使用 `WEBOTER_SERVICE_URL` 调用目标 Weboter service
+2. MCP adapter 使用 `WEBOTER_SERVICE_URL` 或 `mcp.service_url` 连接目标 Weboter service
 3. Weboter service 将控制命令下发到对应 `ExecutionSession`
 
-仓库已经提供两份 MCP 配置样例：
+仓库已经提供几份“单 JSON 连接已启动 service”的样例：
 
 - 同环境直接运行 Python module： [doc/mcp.weboter.json](doc/mcp.weboter.json)
 - Windows agent 调 WSL 内 Weboter： [doc/mcp.weboter.windows-wsl.json](doc/mcp.weboter.windows-wsl.json)
+- Windows `pipx run --spec`： [doc/mcp.weboter.windows-pipx.json](doc/mcp.weboter.windows-pipx.json)
+- Windows `uvx --from`： [doc/mcp.weboter.windows-uvx.json](doc/mcp.weboter.windows-uvx.json)
 
 如果 agent 跑在 Windows，而 `weboter` 项目和虚拟环境在 WSL 里，不要直接让 Windows Python 执行 `python -m weboter.mcp.server`。否则会出现 `ModuleNotFoundError: No module named 'weboter'`，因为那个包并没有安装在 Windows 的 Python 环境里。
 
 这种场景下应改为让 agent 调用 `wsl.exe`，再在 WSL 内激活项目虚拟环境并启动 MCP adapter。
 
-如果 service 没有配置 `WEBOTER_API_TOKEN`，MCP 配置里也不要传这个环境变量；留空字符串没有意义，直接省略即可。
+如果你希望完全通过 MCP JSON 控制外部 MCP adapter，可以直接在 `env` 中设置：
+
+- `WEBOTER_SERVICE_URL`：已启动 Weboter service 的 HTTP 地址
+- `WEBOTER_API_TOKEN`：service 鉴权 token；service 开启鉴权时需要显式传入
+- `WEBOTER_MCP_PROFILE` / `WEBOTER_MCP_TRANSPORT` / `WEBOTER_MCP_CALLER_NAME`：MCP adapter 行为
+
+这里有一个边界：外部 MCP adapter 不会帮你生成或读取 service 本地 token，也不会帮你决定 service 的工作区。service 若已开启鉴权，MCP JSON 里应显式提供 `WEBOTER_API_TOKEN`。
 
 当前 MCP profile 的能力边界如下：
 

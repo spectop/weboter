@@ -4,8 +4,10 @@ import json
 import logging
 from pathlib import Path
 import shutil
+import secrets
 from typing import Any
 
+from weboter.app.config import AppConfig, load_app_config
 from weboter.app.state import ServiceState, default_workspace_root
 from weboter.core.bootstrap import ensure_builtin_packages_registered
 from weboter.core.engine.excutor import Executor
@@ -18,13 +20,65 @@ class WorkflowResolution:
     managed_path: Path | None = None
 
 class WorkflowService:
-    def __init__(self, workspace_root: Path | None = None):
-        self.workspace_root = (workspace_root or default_workspace_root()).resolve()
-        self.data_root = self.workspace_root / ".weboter"
-        self.workflow_store = self.data_root / "workflows"
+    def __init__(self, workspace_root: Path | None = None, config: AppConfig | None = None):
+        config = config or load_app_config()
+        self.config = config
+        self.workspace_root = (workspace_root or config.workspace_root_path() or default_workspace_root()).resolve()
+        self.data_root = config.data_root_path()
+        self.workflow_store = config.workflow_store_path()
         self.workflow_store.mkdir(parents=True, exist_ok=True)
         self.service_state_path = self.data_root / "service.json"
         self.service_log_path = self.data_root / "service.log"
+        self.secret_state_path = config.service_secret_state_path()
+
+    def _read_secret_state(self) -> dict[str, Any]:
+        if not self.secret_state_path.is_file():
+            return {}
+        with open(self.secret_state_path, "r", encoding="utf-8") as file_obj:
+            return json.load(file_obj)
+
+    def _write_secret_state(self, payload: dict[str, Any]) -> None:
+        self.data_root.mkdir(parents=True, exist_ok=True)
+        with open(self.secret_state_path, "w", encoding="utf-8") as file_obj:
+            json.dump(payload, file_obj, ensure_ascii=False, indent=2)
+
+    def get_api_token(self) -> str | None:
+        auth_config = self.config.service.auth
+        if not auth_config.enabled:
+            return None
+        if auth_config.token:
+            return auth_config.token
+        payload = self._read_secret_state()
+        token = str(payload.get("api_token", "")).strip()
+        if token:
+            return token
+        token = secrets.token_urlsafe(24)
+        payload["api_token"] = token
+        payload.setdefault("announced", False)
+        self._write_secret_state(payload)
+        return token
+
+    def get_secret_summary(self) -> dict[str, str]:
+        token = self.get_api_token()
+        if not token:
+            return {}
+        return {"api_token": token}
+
+    def should_announce_secrets(self) -> bool:
+        auth_config = self.config.service.auth
+        if not auth_config.enabled or not auth_config.show_secrets_once:
+            return False
+        payload = self._read_secret_state()
+        return not bool(payload.get("announced"))
+
+    def mark_secrets_announced(self) -> None:
+        if not self.config.service.auth.enabled:
+            return
+        payload = self._read_secret_state()
+        payload["announced"] = True
+        if self.config.service.auth.token and not payload.get("api_token"):
+            payload["api_token"] = self.config.service.auth.token
+        self._write_secret_state(payload)
 
     def build_service_state(self, host: str, port: int, pid: int) -> ServiceState:
         from datetime import datetime

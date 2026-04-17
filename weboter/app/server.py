@@ -15,6 +15,7 @@ from starlette.responses import JSONResponse
 import uvicorn
 
 from weboter.app.client import ServiceClientError, WorkflowServiceClient
+from weboter.app.config import load_app_config
 from weboter.app.session import ExecutionSessionManager
 from weboter.app.service import WorkflowService
 from weboter.app.task_manager import TERMINAL_TASK_STATUSES, TaskManager
@@ -22,6 +23,16 @@ from weboter.app.task_manager import TERMINAL_TASK_STATUSES, TaskManager
 
 DEFAULT_SERVICE_HOST = "127.0.0.1"
 DEFAULT_SERVICE_PORT = 0
+
+
+def _consume_secret_notice(workflow_service: WorkflowService) -> dict[str, str] | None:
+    if not workflow_service.should_announce_secrets():
+        return None
+    secrets_summary = workflow_service.get_secret_summary()
+    if not secrets_summary:
+        return None
+    workflow_service.mark_secrets_announced()
+    return secrets_summary
 
 
 class WorkflowUploadRequest(BaseModel):
@@ -102,7 +113,7 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     system_logger = _configure_service_logger(service)
     session_manager = ExecutionSessionManager(service.data_root / "sessions", system_logger)
     task_manager = TaskManager(service, system_logger, session_manager=session_manager)
-    api_token = os.environ.get("WEBOTER_API_TOKEN", "").strip()
+    api_token = service.get_api_token() or ""
     app = FastAPI(
         title="Weboter Local Service",
         version="0.1.0",
@@ -390,6 +401,12 @@ def serve_foreground(host: str, port: int, workflow_service: WorkflowService | N
     server_socket = _create_server_socket(host, port)
     actual_host, actual_port = server_socket.getsockname()[:2]
     workflow_service.write_service_state(workflow_service.build_service_state(actual_host, actual_port, os.getpid()))
+    if os.environ.get("WEBOTER_SUPPRESS_SECRET_NOTICE", "").strip() != "1":
+        secret_notice = _consume_secret_notice(workflow_service)
+        if secret_notice:
+            print("Weboter secrets (首次启动提示，仅显示一次):", flush=True)
+            for key, value in secret_notice.items():
+                print(f"- {key}: {value}", flush=True)
     server = uvicorn.Server(
         uvicorn.Config(
             app,
@@ -435,6 +452,8 @@ def start_background_service(
         workflow_service.remove_service_state()
 
     workflow_service.data_root.mkdir(parents=True, exist_ok=True)
+    child_env = os.environ.copy()
+    child_env["WEBOTER_SUPPRESS_SECRET_NOTICE"] = "1"
     with open(workflow_service.service_log_path, "a", encoding="utf-8") as log_file:
         process = subprocess.Popen(
             [
@@ -452,6 +471,7 @@ def start_background_service(
             cwd=str(workflow_service.workspace_root),
             stdout=log_file,
             stderr=log_file,
+            env=child_env,
             start_new_session=True,
         )
 
@@ -468,6 +488,7 @@ def start_background_service(
                 "pid": state.pid if state else process.pid,
                 "host": state.host if state else host,
                 "port": state.port if state else port,
+                "secret_notice": _consume_secret_notice(workflow_service),
             }
         except ServiceClientError:
             continue
@@ -510,4 +531,6 @@ def service_status(workflow_service: WorkflowService | None = None) -> dict[str,
         "openapi_url": f"http://{service.get('host')}:{service.get('port')}/openapi.json",
         "docs_url": f"http://{service.get('host')}:{service.get('port')}/docs",
         "service_log_path": str(workflow_service.service_log_path),
+        "config_path": str(workflow_service.config.config_path) if workflow_service.config.config_path else None,
+        "auth_enabled": workflow_service.config.service.auth.enabled,
     }

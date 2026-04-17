@@ -7,9 +7,10 @@
         "weboter.mcp.server"
       ],
       "env": {
-        "WEBOTER_SERVICE_URL": "http://127.0.0.1:8765",
-        "WEBOTER_API_TOKEN": "replace-me",
-        "WEBOTER_MCP_PROFILE": "operator"
+        "WEBOTER_SERVICE_URL": "http://127.0.0.1:34567",
+        "WEBOTER_MCP_PROFILE": "operator",
+        "WEBOTER_MCP_TRANSPORT": "stdio",
+        "WEBOTER_MCP_CALLER_NAME": "mcp"
       }
     }
   }

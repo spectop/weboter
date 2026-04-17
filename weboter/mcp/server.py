@@ -1,10 +1,10 @@
-import os
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from weboter.app.client import WorkflowServiceClient
+from weboter.app.config import load_app_config
 
 
 MCP_INSTRUCTIONS = """
@@ -38,11 +38,16 @@ QUICKSTART_PROMPT = """
 
 
 def _build_client() -> WorkflowServiceClient:
-    service_url = os.environ.get("WEBOTER_SERVICE_URL", "").strip()
+    config = load_app_config()
+    service_url = (config.mcp.service_url or "").strip()
     if not service_url:
-        raise RuntimeError("WEBOTER_SERVICE_URL 未配置")
-    api_token = os.environ.get("WEBOTER_API_TOKEN", "").strip() or None
-    return WorkflowServiceClient(base_url=service_url, api_token=api_token, caller_name="mcp")
+        raise RuntimeError("WEBOTER_SERVICE_URL 未配置；外部 MCP adapter 只负责连接已启动的 Weboter service")
+    api_token = config.client.api_token
+    return WorkflowServiceClient(
+        base_url=service_url,
+        api_token=api_token,
+        caller_name=config.mcp.caller_name,
+    )
 
 
 def _profile_tools(profile: str) -> set[str]:
@@ -116,7 +121,7 @@ def _profile_tools(profile: str) -> set[str]:
 
 def create_mcp_server() -> FastMCP:
     client = _build_client()
-    profile = os.environ.get("WEBOTER_MCP_PROFILE", "operator").strip() or "operator"
+    profile = load_app_config().mcp.profile.strip() or "operator"
     enabled_tools = _profile_tools(profile)
     server = FastMCP("weboter", instructions=MCP_INSTRUCTIONS)
 
@@ -292,7 +297,7 @@ def create_mcp_server() -> FastMCP:
 
 def main() -> None:
     server = create_mcp_server()
-    transport = os.environ.get("WEBOTER_MCP_TRANSPORT", "stdio").strip() or "stdio"
+    transport = load_app_config().mcp.transport.strip() or "stdio"
     server.run(transport=transport)
 
 

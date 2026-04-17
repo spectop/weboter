@@ -17,12 +17,12 @@
 2. Weboter Service 控制面
    - 基于 FastAPI 暴露任务、会话、日志和页面控制接口
    - session 相关能力通过 HTTP API 远程调用
-   - 可通过 `WEBOTER_API_TOKEN` 启用可选鉴权
+    - 自身的监听地址、工作目录和鉴权由 service 侧独立决定
 
 3. MCP Adapter
    - 基于官方 Python `mcp` SDK 的 `FastMCP`
    - 默认使用 `stdio` 作为 MCP client 到 adapter 的传输方式
-   - adapter 再通过 `WEBOTER_SERVICE_URL` 调用 Weboter Service
+    - adapter 只通过 `WEBOTER_SERVICE_URL` / `WEBOTER_MCP_SERVICE_URL` 连接目标 service
    - 因此 agent 与 Weboter service 可以不在同一环境
 
 ## 执行介入模型
@@ -68,7 +68,8 @@
 本阶段先实现两层边界：
 
 1. Service 侧令牌鉴权
-   - 设置 `WEBOTER_API_TOKEN` 后，除 `/health`、`/docs`、`/openapi.json` 外的接口都要求 `X-Weboter-Token`
+    - service 开启鉴权后，除 `/health`、`/docs`、`/openapi.json` 外的接口都要求 `X-Weboter-Token`
+    - 外部 MCP adapter 不负责生成、发现或持久化这个 token；若需要访问受保护 service，应显式传入 `WEBOTER_API_TOKEN`
 
 2. MCP profile
    - `readonly`: 只读任务、会话、日志和快照
@@ -90,7 +91,7 @@
 
 `Agent -> stdio MCP adapter -> HTTP Weboter service -> ExecutionSession`
 
-因此只要 MCP adapter 能访问 `WEBOTER_SERVICE_URL`，agent 和 service 就不必部署在同一环境。
+因此只要 MCP adapter 能访问 `WEBOTER_SERVICE_URL` 指向的 service，agent 和 service 就不必部署在同一环境。
 
 ## 客户端启动面的拆分结论
 
@@ -114,7 +115,7 @@
 
 推荐使用如下 MCP 导入方式。
 
-如果 MCP client、Weboter service 和 `weboter` Python 包在同一个环境中，可以直接运行 module：
+如果 MCP client、Weboter service 和 `weboter` Python 包在同一个环境中，可以直接运行 module；下面这段 JSON 只负责启动 MCP adapter 并连接已启动的 service：
 
 ```json
 {
@@ -126,9 +127,10 @@
         "weboter.mcp.server"
       ],
       "env": {
-        "WEBOTER_SERVICE_URL": "http://127.0.0.1:8765",
-        "WEBOTER_API_TOKEN": "replace-me",
-        "WEBOTER_MCP_PROFILE": "operator"
+        "WEBOTER_SERVICE_URL": "http://127.0.0.1:34567",
+        "WEBOTER_MCP_PROFILE": "operator",
+        "WEBOTER_MCP_TRANSPORT": "stdio",
+        "WEBOTER_MCP_CALLER_NAME": "mcp"
       }
     }
   }
@@ -147,14 +149,14 @@
         "Debian",
         "bash",
         "-lc",
-        "cd /path/to/weboter && . .venv/bin/activate && WEBOTER_SERVICE_URL=http://127.0.0.1:8765 WEBOTER_MCP_PROFILE=operator python -m weboter.mcp.server"
+        "cd /path/to/weboter && . .venv/bin/activate && WEBOTER_SERVICE_URL=http://127.0.0.1:34567 WEBOTER_MCP_PROFILE=operator WEBOTER_MCP_TRANSPORT=stdio WEBOTER_MCP_CALLER_NAME=mcp python -m weboter.mcp.server"
       ]
     }
   }
 }
 ```
 
-如果 service 未启用 `WEBOTER_API_TOKEN`，不要传空字符串，直接省略该环境变量即可。
+这条边界需要保持简单明确：service 如何启动、监听在哪、token 是什么，都由 service 自己负责；外部 MCP adapter 只拿 `WEBOTER_SERVICE_URL` 和可选 `WEBOTER_API_TOKEN` 进行连接。
 
 ## 后续可继续扩展的部分
 

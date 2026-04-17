@@ -2,11 +2,13 @@ import argparse
 from dataclasses import asdict
 import json
 import logging
+import os
 import textwrap
 from pathlib import Path
 import sys
 
 from weboter.app.client import ServiceClientError, WorkflowServiceClient
+from weboter.app.config import load_app_config
 
 
 DEFAULT_SERVICE_HOST = "127.0.0.1"
@@ -31,6 +33,7 @@ def _load_local_service_stack() -> tuple:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    config = load_app_config()
     parser = argparse.ArgumentParser(
         prog="weboter",
         description="Weboter 本地 workflow service 与 CLI 工具",
@@ -46,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("--config", type=Path, help="指定 Weboter YAML 配置文件路径")
     subparsers = parser.add_subparsers(dest="command")
 
     service_parser = subparsers.add_parser(
@@ -64,8 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     service_parser.add_argument("action", choices=["start", "stop", "status", "logs"])
-    service_parser.add_argument("--host", default=DEFAULT_SERVICE_HOST, help="service 监听地址")
-    service_parser.add_argument("--port", type=int, default=DEFAULT_SERVICE_PORT, help="service 监听端口，默认自动分配")
+    service_parser.add_argument("--host", default=None, help=f"service 监听地址，默认读取配置文件（当前 {config.service.host}）")
+    service_parser.add_argument("--port", type=int, default=None, help=f"service 监听端口，默认读取配置文件（当前 {config.service.port}）")
     service_parser.add_argument("--lines", type=int, default=200, help="查看日志时输出的最后行数")
     service_parser.add_argument("--json", action="store_true", help="以 JSON 输出 service 结果")
     service_parser.add_argument("--foreground", action="store_true", help=argparse.SUPPRESS)
@@ -135,6 +139,12 @@ def _print_result(result: dict, json_output: bool = False) -> None:
     if json_output:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
+
+    secret_notice = result.get("secret_notice")
+    if isinstance(secret_notice, dict) and secret_notice:
+        print("Weboter secrets (首次启动提示，仅显示一次):")
+        for key, value in secret_notice.items():
+            print(f"- {key}: {value}")
 
     if result.get("status") in {"started", "already-running"}:
         print(f"service {result['status']}: pid={result.get('pid')} {result.get('host')}:{result.get('port')}")
@@ -210,8 +220,15 @@ def _resolve_remote_workflow_directory(args: argparse.Namespace, client: Workflo
 
 
 def main() -> int:
+    config_arg_parser = argparse.ArgumentParser(add_help=False)
+    config_arg_parser.add_argument("--config", type=Path)
+    config_args, _ = config_arg_parser.parse_known_args()
+    if config_args.config:
+        os.environ["WEBOTER_CONFIG"] = str(config_args.config.expanduser().resolve())
+
     parser = build_parser()
     args = parser.parse_args()
+    config = load_app_config()
 
     if args.command == "service":
         try:
@@ -223,9 +240,11 @@ def main() -> int:
         client = WorkflowServiceClient(workflow_service)
         try:
             if args.action == "start":
+                host = args.host or config.service.host or DEFAULT_SERVICE_HOST
+                port = args.port if args.port is not None else config.service.port
                 if args.foreground:
-                    return serve_foreground(args.host, args.port, workflow_service)
-                _print_result(start_background_service(args.host, args.port, workflow_service), args.json)
+                    return serve_foreground(host, port, workflow_service)
+                _print_result(start_background_service(host, port, workflow_service), args.json)
                 return 0
             if args.action == "stop":
                 _print_result(stop_background_service(workflow_service), args.json)

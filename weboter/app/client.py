@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 import urllib.error
 import urllib.parse
@@ -10,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 
+from weboter.app.config import load_app_config
 from weboter.app.state import ServiceState, default_service_state_path, load_service_state
 
 if TYPE_CHECKING:
@@ -33,11 +33,21 @@ class WorkflowServiceClient:
         workspace_root: Path | None = None,
         state_path: Path | None = None,
     ):
+        config = load_app_config()
         self.workflow_service = workflow_service
         self.base_url = base_url.rstrip("/") if base_url else None
-        self.api_token = api_token if api_token is not None else os.environ.get("WEBOTER_API_TOKEN")
-        self.caller_name = caller_name or os.environ.get("WEBOTER_CALLER_NAME", "")
+        default_token = config.client.api_token
+        if default_token is None and config.service.auth.enabled:
+            if config.service.auth.token:
+                default_token = config.service.auth.token
+            else:
+                from weboter.app.service import WorkflowService
+
+                default_token = WorkflowService(config=config).get_api_token()
+        self.api_token = api_token if api_token is not None else default_token
+        self.caller_name = caller_name if caller_name is not None else config.client.caller_name
         self.state_path = (state_path or default_service_state_path(workspace_root)).expanduser().resolve()
+        self.request_timeout = config.client.request_timeout
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def _serialize_service_path(self, path: Path | str) -> str:
@@ -77,7 +87,7 @@ class WorkflowServiceClient:
 
         request = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:
-            with self._opener.open(request, timeout=10) as response:
+            with self._opener.open(request, timeout=self.request_timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             try:

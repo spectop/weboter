@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 import json
-import os
 from pathlib import Path
+
+from weboter.app.config import load_app_config
 
 
 @dataclass
@@ -15,11 +16,17 @@ class ServiceState:
 
 
 def default_workspace_root() -> Path:
-    return Path(os.environ.get("WEBOTER_HOME", Path(__file__).resolve().parents[2])).resolve()
+    return load_app_config().workspace_root_path()
 
 
 def default_data_root(workspace_root: Path | None = None) -> Path:
-    return (workspace_root or default_workspace_root()).resolve() / ".weboter"
+    config = load_app_config()
+    if workspace_root is not None:
+        candidate = Path(config.paths.data_root).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace_root.resolve() / candidate
+        return candidate.resolve()
+    return config.data_root_path()
 
 
 def default_service_state_path(workspace_root: Path | None = None) -> Path:
