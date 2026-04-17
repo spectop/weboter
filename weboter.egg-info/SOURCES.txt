@@ -1,6 +1,7 @@
 LICENSE
 README.md
 pyproject.toml
+tests/test_session_debug.py
 weboter/__main__.py
 weboter/cli.py
 weboter.egg-info/PKG-INFO
@@ -10,6 +11,7 @@ weboter.egg-info/entry_points.txt
 weboter.egg-info/requires.txt
 weboter.egg-info/top_level.txt
 weboter/app/client.py
+weboter/app/config.py
 weboter/app/server.py
 weboter/app/service.py
 weboter/app/session.py

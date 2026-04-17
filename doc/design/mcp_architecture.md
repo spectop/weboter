@@ -78,20 +78,34 @@ flowchart LR
 会话支持以下介入动作：
 
 - `pause`
+- `interrupt_next`
 - `resume`
 - `abort`
 - `set_context`
 - `jump_to_node`
 - `patch_node`
 - `add_node`
+- `read_workflow`
+- `update_breakpoints`
+- `clear_breakpoints`
 - `export_workflow`
 - `page_snapshot`
-- `page_evaluate`
-- `page_goto`
-- `page_click`
-- `page_fill`
+- `page_run_script`
 
 这些动作不会在外部线程直接碰运行中的 Playwright 对象，而是通过会话命令队列回到执行线程自己的事件循环中执行。
+
+其中有两点是为了满足 agent 调试而新增的：
+
+1. `interrupt_next` 与 `breakpoints`
+  - `pause` 只能在执行线程回到命令检查点时生效，无法保证停在目标节点前
+  - 对于“还没启动就要停在第一个节点前”的场景，提交 workflow 时应直接携带 `pause_before_start`
+  - `interrupt_next` 会在下一个节点执行前进入暂停态
+  - `breakpoints` 支持按 `phase + node_id/node_name` 精确停靠，当前推荐默认使用 `before_step`
+
+2. `page_run_script`
+  - 不再要求 MCP 为 `click`、`fill`、`press`、`hover` 等动作各自暴露独立 tool
+  - agent 通过单个受控脚本入口直接编写 Playwright 页面操作逻辑
+  - service 侧负责脚本 AST 校验、超时控制和运行结果快照，避免控制面无限膨胀
 
 ## Guard Hook
 
@@ -113,8 +127,18 @@ flowchart LR
 
 2. MCP profile
    - `readonly`: 只读任务、会话、日志和快照
-   - `operator`: 在只读基础上允许会话控制和页面操作
-   - `admin`: 在 operator 基础上允许新增节点和导出修改后的 workflow
+  - `operator`: 在只读基础上允许会话控制、断点调试、workflow 修改和通用页面脚本
+  - `admin`: 当前与 `operator` 接近，保留为后续增加更高风险操作的预留层
+
+## 推荐的 Agent Debug 提交流程
+
+1. 提交时就决定是否需要首节点停靠
+  - 首次探索 workflow：`pause_before_start=true`
+  - 已知目标节点：`breakpoints=[{"phase": "before_step", "node_id": "target"}]`
+2. 从提交结果里的 `task.session_id` 直接进入会话调试
+3. 用 `session_get`、`session_snapshots`、`session_workflow` 建立第一现场
+4. 需要页面探索时，先 `page_snapshot`，再 `page_run_script`
+5. 修改完成后再 `resume` 或 `abort`
 
 ## 会话与任务关系
 

@@ -1,6 +1,7 @@
 import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+import ast
 import json
 import logging
 from pathlib import Path
@@ -8,6 +9,7 @@ import queue
 import threading
 import time
 from typing import Any
+from uuid import uuid4
 
 import playwright.async_api as pw
 
@@ -48,6 +50,9 @@ class SessionRecord:
     last_snapshot_path: str | None = None
     current_page_url: str | None = None
     current_page_title: str | None = None
+    breakpoints: list[dict[str, Any]] = field(default_factory=list)
+    last_stop: dict[str, Any] | None = None
+    interrupt_requested: bool = False
 
 
 class SessionHooks:
@@ -89,6 +94,9 @@ class ExecutionSession:
         self._guard_waiting = False
         self._abort_requested = False
         self._resume_reason: str | None = None
+        self._interrupt_requested = False
+        self._breakpoints: list[dict[str, Any]] = []
+        self._active_executor = None
 
     def create_hooks(self) -> SessionHooks:
         return SessionHooks(self)
@@ -101,6 +109,53 @@ class ExecutionSession:
                 self.record.status = SESSION_STATUS_PAUSED
             self.manager._save_record(self.record)
             return asdict(self.record)
+
+    def request_interrupt(self, reason: str = "interrupt_next") -> dict[str, Any]:
+        with self._lock:
+            self._interrupt_requested = True
+            self.record.interrupt_requested = True
+            self.record.pause_reason = reason
+            self.manager._save_record(self.record)
+            return asdict(self.record)
+
+    def configure_breakpoints(self, breakpoints: list[dict[str, Any]], replace: bool = True) -> dict[str, Any]:
+        normalized = [self._normalize_breakpoint(item) for item in breakpoints]
+        with self._lock:
+            if replace:
+                self._breakpoints = normalized
+            else:
+                self._breakpoints.extend(normalized)
+            self.record.breakpoints = self._serialize_breakpoints()
+            self.manager._save_record(self.record)
+            return {
+                "session": asdict(self.record),
+                "breakpoints": self._serialize_breakpoints(),
+            }
+
+    def clear_breakpoints(self, breakpoint_ids: list[str] | None = None) -> dict[str, Any]:
+        with self._lock:
+            if breakpoint_ids:
+                target_ids = set(breakpoint_ids)
+                self._breakpoints = [item for item in self._breakpoints if item["id"] not in target_ids]
+            else:
+                self._breakpoints = []
+            self.record.breakpoints = self._serialize_breakpoints()
+            self.manager._save_record(self.record)
+            return {
+                "session": asdict(self.record),
+                "breakpoints": self._serialize_breakpoints(),
+            }
+
+    def describe_workflow(self) -> dict[str, Any]:
+        executor = self._active_executor
+        if executor is None or executor.workflow is None:
+            raise ValueError(f"Session workflow is not available: {self.record.session_id}")
+        return {
+            "session_id": self.record.session_id,
+            "task_id": self.record.task_id,
+            "current_node_id": executor.runtime.current_node_id,
+            "workflow": self._serialize_flow(executor.workflow),
+        }
 
     def dispatch_command(
         self,
@@ -120,6 +175,7 @@ class ExecutionSession:
         return command.result
 
     async def on_workflow_loaded(self, executor, flow: Flow) -> None:
+        self._active_executor = executor
         with self._lock:
             self.record.status = SESSION_STATUS_RUNNING
             self.record.workflow_name = flow.name
@@ -128,14 +184,18 @@ class ExecutionSession:
         await self.capture_snapshot(executor, phase="loaded")
 
     async def before_step(self, executor, node: Node) -> None:
+        self._active_executor = executor
         await self.capture_snapshot(executor, phase="before_step", node=node)
+        await self._arm_debug_stop(executor, phase="before_step", node=node)
         await self._wait_for_commands(executor)
 
     async def after_step(self, executor, node: Node, next_node_id: str) -> None:
+        self._active_executor = executor
         await self.capture_snapshot(executor, phase="after_step", node=node, next_node_id=next_node_id)
         await self._wait_for_commands(executor)
 
     async def on_error(self, executor, exc: Exception) -> bool:
+        self._active_executor = executor
         with self._lock:
             self._guard_waiting = True
             self.record.status = SESSION_STATUS_GUARD_WAITING
@@ -159,6 +219,7 @@ class ExecutionSession:
         return True
 
     async def on_finished(self, executor) -> None:
+        self._active_executor = executor
         await self.capture_snapshot(executor, phase="finished")
 
     def mark_finished(self, success: bool, error: str | None = None) -> None:
@@ -190,6 +251,12 @@ class ExecutionSession:
             "node": self._serialize_node(node),
             "next_node_id": next_node_id,
             "runtime": self._serialize_runtime(executor.runtime.data_context.data),
+            "workflow": self._serialize_flow(executor.workflow),
+            "debug": {
+                "breakpoints": self._serialize_breakpoints(),
+                "interrupt_requested": self._interrupt_requested,
+                "last_stop": self.record.last_stop,
+            },
             "page": page_info,
             "error": error,
         }
@@ -206,9 +273,57 @@ class ExecutionSession:
             self.record.current_page_url = page_info.get("url") if page_info else None
             self.record.current_page_title = page_info.get("title") if page_info else None
             self.record.last_snapshot_path = str(snapshot_path)
+            self.record.breakpoints = self._serialize_breakpoints()
+            self.record.interrupt_requested = self._interrupt_requested
             self.record.updated_at = self.manager._now()
             self.manager._save_record(self.record)
         return snapshot
+
+    async def _arm_debug_stop(
+        self,
+        executor,
+        phase: str,
+        node: Node | None = None,
+        next_node_id: str | None = None,
+    ) -> None:
+        stop_detail: dict[str, Any] | None = None
+        with self._lock:
+            if phase == "before_step" and self._interrupt_requested:
+                stop_detail = {
+                    "type": "interrupt",
+                    "phase": phase,
+                    "node_id": node.node_id if node else None,
+                    "node_name": node.name if node else None,
+                    "reason": self.record.pause_reason or "interrupt_next",
+                }
+                self._interrupt_requested = False
+            else:
+                matched_breakpoint = self._match_breakpoint(phase, node, next_node_id)
+                if matched_breakpoint is not None:
+                    stop_detail = {
+                        "type": "breakpoint",
+                        "phase": phase,
+                        "node_id": node.node_id if node else None,
+                        "node_name": node.name if node else None,
+                        "breakpoint": dict(matched_breakpoint),
+                    }
+                    if matched_breakpoint.get("once"):
+                        self._breakpoints = [item for item in self._breakpoints if item["id"] != matched_breakpoint["id"]]
+
+            if stop_detail is None:
+                self.record.breakpoints = self._serialize_breakpoints()
+                self.record.interrupt_requested = self._interrupt_requested
+                return
+
+            self._pause_requested = True
+            self.record.status = SESSION_STATUS_PAUSED
+            self.record.pause_reason = stop_detail["type"]
+            self.record.last_stop = stop_detail
+            self.record.breakpoints = self._serialize_breakpoints()
+            self.record.interrupt_requested = self._interrupt_requested
+            self.manager._save_record(self.record)
+
+        await self.capture_snapshot(executor, phase="debug_stop", node=node, next_node_id=next_node_id)
 
     async def _wait_for_commands(self, executor) -> None:
         while self._pause_requested or self._guard_waiting or not self._commands.empty():
@@ -243,6 +358,7 @@ class ExecutionSession:
                 self._pause_requested = False
                 self._guard_waiting = False
                 self.record.pause_reason = None
+                self.record.last_stop = None
                 self.record.updated_at = self.manager._now()
                 self.manager._save_record(self.record)
                 return asdict(self.record)
@@ -253,9 +369,19 @@ class ExecutionSession:
                 self._pause_requested = False
                 self._guard_waiting = False
                 self.record.pause_reason = None
+                self.record.last_stop = None
                 self.record.updated_at = self.manager._now()
                 self.manager._save_record(self.record)
                 return asdict(self.record)
+
+        if action == "interrupt":
+            return self.request_interrupt(payload.get("reason") or "interrupt_next")
+
+        if action == "configure_breakpoints":
+            return self.configure_breakpoints(payload.get("breakpoints", []), replace=payload.get("replace", True))
+
+        if action == "clear_breakpoints":
+            return self.clear_breakpoints(payload.get("breakpoint_ids"))
 
         if action == "set_context":
             executor.runtime.set_value(payload["key"], payload["value"])
@@ -287,6 +413,14 @@ class ExecutionSession:
             page = self._require_page(executor)
             return await page.evaluate(payload["script"], payload.get("arg"))
 
+        if action == "page_run_script":
+            return await self._run_page_script(
+                executor,
+                payload["code"],
+                payload.get("arg"),
+                payload.get("timeout_ms", 5000),
+            )
+
         if action == "page_goto":
             page = self._require_page(executor)
             await page.goto(payload["url"])
@@ -303,6 +437,38 @@ class ExecutionSession:
             return {"filled": payload["locator"]}
 
         raise ValueError(f"Unsupported session command: {action}")
+
+    async def _run_page_script(self, executor, code: str, arg: Any = None, timeout_ms: int = 5000) -> dict[str, Any]:
+        page = self._require_page(executor)
+        compiled = self._compile_page_script(code)
+        script_globals = {
+            "__builtins__": self._safe_script_builtins(),
+        }
+        script_locals: dict[str, Any] = {}
+        exec(compiled, script_globals, script_locals)
+        runner = script_locals["__weboter_page_script__"]
+        runtime_snapshot = self._serialize_runtime(executor.runtime.data_context.data)
+        workflow_snapshot = self._serialize_flow(executor.workflow)
+        context = {
+            "session_id": self.record.session_id,
+            "task_id": self.record.task_id,
+            "workflow": workflow_snapshot,
+            "runtime": runtime_snapshot,
+            "current_node_id": executor.runtime.current_node_id,
+            "arg": arg,
+        }
+        result = await asyncio.wait_for(runner(page, context), timeout=max(timeout_ms, 1) / 1000)
+        page_info = await self._collect_page_info(executor, detail=True)
+        snapshot = await self.capture_snapshot(executor, phase="page_script")
+        return {
+            "result": self._serialize_runtime(result),
+            "page": page_info,
+            "snapshot": {
+                "index": snapshot["index"],
+                "phase": snapshot["phase"],
+                "timestamp": snapshot["timestamp"],
+            },
+        }
 
     async def _collect_page_info(self, executor, detail: bool = False) -> dict[str, Any] | None:
         page = executor.runtime.get_value("$global{{current_page}}")
@@ -321,6 +487,7 @@ class ExecutionSession:
         if detail:
             base_name = f"page_{int(time.time() * 1000)}"
             session_root = self.manager.session_root(self.record.session_id)
+            session_root.mkdir(parents=True, exist_ok=True)
             html_path = session_root / f"{base_name}.html"
             screenshot_path = session_root / f"{base_name}.png"
             try:
@@ -344,6 +511,56 @@ class ExecutionSession:
         if not isinstance(page, pw.Page):
             raise ValueError("Current page handle is invalid")
         return page
+
+    @staticmethod
+    def _safe_script_builtins() -> dict[str, Any]:
+        return {
+            "len": len,
+            "str": str,
+            "int": int,
+            "float": float,
+            "bool": bool,
+            "dict": dict,
+            "list": list,
+            "tuple": tuple,
+            "set": set,
+            "min": min,
+            "max": max,
+            "sum": sum,
+            "range": range,
+            "enumerate": enumerate,
+            "zip": zip,
+            "sorted": sorted,
+            "any": any,
+            "all": all,
+            "abs": abs,
+        }
+
+    @classmethod
+    def _compile_page_script(cls, code: str):
+        source = code.strip()
+        if not source:
+            raise ValueError("页面脚本不能为空")
+        try:
+            tree = ast.parse(source, mode="exec")
+        except SyntaxError as exc:
+            raise ValueError(f"页面脚本语法错误: {exc}") from exc
+
+        forbidden_nodes = (ast.Import, ast.ImportFrom, ast.Global, ast.Nonlocal, ast.ClassDef)
+        for node in ast.walk(tree):
+            if isinstance(node, forbidden_nodes):
+                raise ValueError(f"页面脚本不允许使用 {type(node).__name__}")
+            if isinstance(node, ast.Name) and node.id.startswith("__"):
+                raise ValueError("页面脚本不允许访问双下划线名称")
+            if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+                raise ValueError("页面脚本不允许访问双下划线属性")
+
+        indented = "\n".join(f"    {line}" if line.strip() else "" for line in source.splitlines())
+        wrapped = (
+            "async def __weboter_page_script__(page, context):\n"
+            f"{indented}\n"
+        )
+        return compile(wrapped, "<weboter-page-script>", "exec")
 
     @staticmethod
     def _serialize_runtime(data: Any) -> Any:
@@ -374,6 +591,53 @@ class ExecutionSession:
             "outputs": [asdict(item) for item in node.outputs],
             "log": node.log,
         }
+
+    @staticmethod
+    def _serialize_flow(flow: Flow | None) -> dict[str, Any] | None:
+        if flow is None:
+            return None
+        return {
+            "flow_id": flow.flow_id,
+            "name": flow.name,
+            "description": flow.description,
+            "start_node_id": flow.start_node_id,
+            "log": flow.log,
+            "nodes": [ExecutionSession._serialize_node(item) for item in flow.nodes],
+        }
+
+    @staticmethod
+    def _normalize_breakpoint(data: dict[str, Any]) -> dict[str, Any]:
+        phase = (data.get("phase") or "before_step").strip() or "before_step"
+        node_id = (data.get("node_id") or "").strip() or None
+        node_name = (data.get("node_name") or "").strip() or None
+        if node_id is None and node_name is None:
+            raise ValueError("断点至少需要 node_id 或 node_name")
+        return {
+            "id": (data.get("id") or uuid4().hex[:8]).strip(),
+            "phase": phase,
+            "node_id": node_id,
+            "node_name": node_name,
+            "enabled": bool(data.get("enabled", True)),
+            "once": bool(data.get("once", False)),
+        }
+
+    def _serialize_breakpoints(self) -> list[dict[str, Any]]:
+        return [dict(item) for item in self._breakpoints]
+
+    def _match_breakpoint(self, phase: str, node: Node | None, next_node_id: str | None = None) -> dict[str, Any] | None:
+        for item in self._breakpoints:
+            if not item.get("enabled", True):
+                continue
+            if item.get("phase") not in {phase, "*"}:
+                continue
+            if item.get("node_id") and (node is None or item["node_id"] != node.node_id):
+                continue
+            if item.get("node_name") and (node is None or item["node_name"] != node.name):
+                continue
+            if item.get("next_node_id") and item.get("next_node_id") != next_node_id:
+                continue
+            return item
+        return None
 
     @staticmethod
     def _build_node(data: dict[str, Any]) -> Node:
@@ -421,6 +685,8 @@ class ExecutionSessionManager:
         workflow_name: str,
         log_path: Path,
         permissions: list[str] | None = None,
+        pause_before_start: bool = False,
+        breakpoints: list[dict[str, Any]] | None = None,
     ) -> ExecutionSession:
         record = SessionRecord(
             session_id=task_id,
@@ -434,6 +700,10 @@ class ExecutionSessionManager:
             permissions=permissions or [OBSERVE_PERMISSION, CONTROL_PERMISSION, PAGE_PERMISSION, WORKFLOW_EDIT_PERMISSION],
         )
         session = ExecutionSession(self, record)
+        if breakpoints:
+            session.configure_breakpoints(breakpoints)
+        if pause_before_start:
+            session.request_interrupt("start_before_first_node")
         with self._lock:
             self._live_sessions[record.session_id] = session
             self._save_record(record)
@@ -458,6 +728,10 @@ class ExecutionSessionManager:
     def request_pause(self, session_id: str, reason: str = "manual") -> dict[str, Any]:
         session = self._require_live_session(session_id)
         return session.request_pause(reason)
+
+    def request_interrupt(self, session_id: str, reason: str = "interrupt_next") -> dict[str, Any]:
+        session = self._require_live_session(session_id)
+        return session.request_interrupt(reason)
 
     def resume(self, session_id: str) -> dict[str, Any]:
         session = self._require_live_session(session_id)
@@ -487,6 +761,23 @@ class ExecutionSessionManager:
         session = self._require_live_session(session_id)
         return session.dispatch_command("export_workflow", {"path": path})
 
+    def get_workflow(self, session_id: str) -> dict[str, Any]:
+        session = self._require_live_session(session_id)
+        return session.describe_workflow()
+
+    def configure_breakpoints(
+        self,
+        session_id: str,
+        breakpoints: list[dict[str, Any]],
+        replace: bool = True,
+    ) -> dict[str, Any]:
+        session = self._require_live_session(session_id)
+        return session.configure_breakpoints(breakpoints, replace=replace)
+
+    def clear_breakpoints(self, session_id: str, breakpoint_ids: list[str] | None = None) -> dict[str, Any]:
+        session = self._require_live_session(session_id)
+        return session.clear_breakpoints(breakpoint_ids)
+
     def page_snapshot(self, session_id: str) -> dict[str, Any]:
         session = self._require_live_session(session_id)
         return session.dispatch_command("page_snapshot", {})
@@ -494,6 +785,13 @@ class ExecutionSessionManager:
     def page_evaluate(self, session_id: str, script: str, arg: Any = None) -> Any:
         session = self._require_live_session(session_id)
         return session.dispatch_command("page_evaluate", {"script": script, "arg": arg})
+
+    def page_run_script(self, session_id: str, code: str, arg: Any = None, timeout_ms: int = 5000) -> dict[str, Any]:
+        session = self._require_live_session(session_id)
+        return session.dispatch_command(
+            "page_run_script",
+            {"code": code, "arg": arg, "timeout_ms": timeout_ms},
+        )
 
     def page_goto(self, session_id: str, url: str) -> dict[str, Any]:
         session = self._require_live_session(session_id)

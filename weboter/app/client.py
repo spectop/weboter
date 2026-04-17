@@ -109,11 +109,22 @@ class WorkflowServiceClient:
     def service_state(self) -> dict[str, Any]:
         return self._request("GET", "/service/state")
 
-    def upload_workflow(self, source: Path, execute: bool = False) -> dict[str, Any]:
+    def upload_workflow(
+        self,
+        source: Path,
+        execute: bool = False,
+        pause_before_start: bool = False,
+        breakpoints: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         return self._request(
             "POST",
             "/workflow/upload",
-            {"path": self._serialize_service_path(source), "execute": execute},
+            {
+                "path": self._serialize_service_path(source),
+                "execute": execute,
+                "pause_before_start": pause_before_start,
+                "breakpoints": breakpoints or [],
+            },
         )
 
     def handle_directory(
@@ -123,6 +134,8 @@ class WorkflowServiceClient:
         list_only: bool = False,
         delete: bool = False,
         execute: bool = False,
+        pause_before_start: bool = False,
+        breakpoints: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -133,6 +146,8 @@ class WorkflowServiceClient:
                 "list": list_only,
                 "delete": delete,
                 "execute": execute,
+                "pause_before_start": pause_before_start,
+                "breakpoints": breakpoints or [],
             },
         )
 
@@ -161,6 +176,9 @@ class WorkflowServiceClient:
     def pause_session(self, session_id: str) -> dict[str, Any]:
         return self._request("POST", f"/sessions/{session_id}/pause", {})
 
+    def interrupt_session(self, session_id: str, reason: str = "interrupt_next") -> dict[str, Any]:
+        return self._request("POST", f"/sessions/{session_id}/interrupt", {"reason": reason})
+
     def resume_session(self, session_id: str) -> dict[str, Any]:
         return self._request("POST", f"/sessions/{session_id}/resume", {})
 
@@ -179,6 +197,28 @@ class WorkflowServiceClient:
     def add_session_node(self, session_id: str, node: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", f"/sessions/{session_id}/add-node", {"node": node})
 
+    def get_session_workflow(self, session_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/sessions/{session_id}/workflow")
+
+    def configure_session_breakpoints(
+        self,
+        session_id: str,
+        breakpoints: list[dict[str, Any]],
+        replace: bool = True,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/sessions/{session_id}/breakpoints",
+            {"breakpoints": breakpoints, "replace": replace},
+        )
+
+    def clear_session_breakpoints(self, session_id: str, breakpoint_ids: list[str] | None = None) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/sessions/{session_id}/breakpoints/clear",
+            {"breakpoint_ids": breakpoint_ids},
+        )
+
     def export_session_workflow(self, session_id: str, path: str) -> dict[str, Any]:
         return self._request("POST", f"/sessions/{session_id}/export-workflow", {"path": path})
 
@@ -187,6 +227,19 @@ class WorkflowServiceClient:
 
     def evaluate_session_page(self, session_id: str, script: str, arg: Any = None) -> dict[str, Any]:
         return self._request("POST", f"/sessions/{session_id}/page/evaluate", {"script": script, "arg": arg})
+
+    def run_session_page_script(
+        self,
+        session_id: str,
+        code: str,
+        arg: Any = None,
+        timeout_ms: int = 5000,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/sessions/{session_id}/page/script",
+            {"code": code, "arg": arg, "timeout_ms": timeout_ms},
+        )
 
     def session_page_goto(self, session_id: str, url: str) -> dict[str, Any]:
         return self._request("POST", f"/sessions/{session_id}/page/goto", {"url": url})

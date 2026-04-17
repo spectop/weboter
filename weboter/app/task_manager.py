@@ -51,7 +51,13 @@ class TaskManager:
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="weboter-task")
 
-    def submit(self, workflow_path: Path, trigger: str) -> TaskRecord:
+    def submit(
+        self,
+        workflow_path: Path,
+        trigger: str,
+        pause_before_start: bool = False,
+        breakpoints: list[dict[str, Any]] | None = None,
+    ) -> TaskRecord:
         task_id = uuid4().hex[:12]
         log_path = self.task_root / f"{task_id}.log"
         record = TaskRecord(
@@ -65,7 +71,14 @@ class TaskManager:
             log_path=str(log_path),
         )
         if self.session_manager is not None:
-            self.session_manager.create_session(task_id, workflow_path, workflow_path.stem, log_path)
+            self.session_manager.create_session(
+                task_id,
+                workflow_path,
+                workflow_path.stem,
+                log_path,
+                pause_before_start=pause_before_start,
+                breakpoints=breakpoints,
+            )
         self._save(record)
         self.system_logger.info("任务已创建: %s -> %s", task_id, workflow_path)
         self._executor.submit(self._run_task, task_id)

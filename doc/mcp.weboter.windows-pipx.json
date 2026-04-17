@@ -5,7 +5,7 @@
       "args": [
         "run",
         "--spec",
-        "C:\\path\\to\\dist\\weboter-0.1.2-py3-none-any.whl",
+        "C:\\path\\to\\dist\\weboter-0.1.5-py3-none-any.whl",
         "weboter-mcp"
       ],
       "env": {

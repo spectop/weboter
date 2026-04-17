@@ -13,11 +13,12 @@ Weboter 是一个通过远程 service 执行 workflow 的 MCP adapter。
 使用要点：
 - 先调用 service_status，确认 service.health.status 为 ok。
 - workflow_list 返回的是 service 感知的逻辑名，不带 .json 后缀；多层目录会显示为点号名，例如 pack_a.pack_b.do_sth。
-- 需要执行现有受管 workflow 时，优先使用 workflow_submit_managed(name=...)。
-- 需要上传本地 workflow 文件时，使用 workflow_submit_upload(path=...)。
-- task_* 用于查看任务结果和日志；session_* 用于运行中介入、观察快照、修改上下文、跳转节点和页面操作。
+- 需要执行现有受管 workflow 时，优先使用 workflow_submit_managed(name=...)；如果要调试首个节点，直接在提交时带上 pause_before_start 或 breakpoints。
+- 需要上传本地 workflow 文件时，使用 workflow_submit_upload(path=...)；同样支持在提交时预设调试参数。
+- task_* 用于查看任务结果和日志；session_* 用于运行中介入、观察快照、配置断点、修改 workflow 和执行通用页面脚本。
 - 默认不要猜测磁盘上的真实文件路径；优先依赖 workflow_list 返回的逻辑名。
-- 如果只需要观察，使用只读工具；涉及执行、页面操作或 workflow 修改时，再使用 operator/admin 能力。
+- 如果只需要观察，使用只读工具；涉及执行、页面脚本或 workflow 修改时，再使用 operator/admin 能力。
+- `pause` 适合让已停住的会话继续保持暂停；真正想“停在第一个节点前”时，应优先在 workflow_submit_* 阶段传入 `pause_before_start=True`。
 """.strip()
 
 
@@ -27,13 +28,112 @@ QUICKSTART_PROMPT = """
 推荐工作顺序：
 1. 调用 service_status 检查 service 是否可用。
 2. 调用 workflow_list 查看当前 service 可感知的 workflow 逻辑名。
-3. 若要执行受管 workflow，调用 workflow_submit_managed，并传入 workflow_list 返回的 name。
-4. 执行后用 task_list、task_get、task_logs 跟踪结果。
-5. 如果任务进入可介入阶段，再用 session_list、session_get、session_snapshots 和 session_* / session_page_* 工具处理。
+3. 如果只是正常执行，调用 workflow_submit_managed 或 workflow_submit_upload。
+4. 如果你要调试首个节点，提交时直接传 `pause_before_start=True`；如果你要停在特定节点前，提交时直接传 `breakpoints=[{"phase": "before_step", "node_id": "..."}]`。
+5. 提交结果里的 `task.session_id` 就是本次会话 ID，不需要等任务跑完再查 session。
+6. 用 task_get、task_logs 跟踪任务状态；如果 session 已停住，再用 session_get、session_snapshots、session_workflow 读取第一现场。
+7. 需要改流程时，优先用 session_patch_node、session_add_node、session_jump_node、session_set_context。
+8. 需要页面调试时，优先用 session_page_snapshot 获取 HTML/截图，再用 session_page_run_script 执行受控 Playwright 脚本。
+9. 修改完成后用 session_resume 恢复，或用 session_abort 终止。
+
+典型 debug 流程：
+- 停在开始前：`workflow_submit_managed(name="demo", pause_before_start=True)`
+- 停在指定节点前：`workflow_submit_managed(name="demo", breakpoints=[{"phase": "before_step", "node_id": "login"}])`
+- 读取上下文：`session_get(session_id)` + `session_snapshots(session_id)` + `session_workflow(session_id)`
+- 调页面：先 `session_page_snapshot(session_id)`，再 `session_page_run_script(session_id, code=...)`
+- 改流程：`session_patch_node(...)` / `session_add_node(...)` / `session_jump_node(...)`
+- 放行继续：`session_resume(session_id)`
 
 命名规则：
 - workflow 名称不带 .json。
 - 多层目录映射为点号名称，例如 pack_a/pack_b/do_sth.json -> pack_a.pack_b.do_sth。
+""".strip()
+
+
+DEBUG_PLAYBOOK_PROMPT = """
+Weboter MCP 调试手册。
+
+适用场景：
+- 想在第一个节点执行前停住
+- 想在某个特定节点前停住
+- 任务已经报错，想读取第一现场并修复
+- 需要动态修改 workflow 或直接调试页面
+
+推荐顺序：
+1. 确认 service 可用：`service_status()`
+2. 提交执行时直接预设调试策略：
+    - 首节点停住：`pause_before_start=True`
+    - 指定节点停住：`breakpoints=[{"phase": "before_step", "node_id": "target"}]`
+3. 从返回结果中读取 `task.session_id`
+4. 用 `session_get()`、`session_snapshots()`、`session_workflow()` 建立上下文
+5. 需要修改流程时，按需使用：
+    - `session_set_context()`：改运行时上下文
+    - `session_patch_node()`：改现有节点定义
+    - `session_add_node()`：补新节点
+    - `session_jump_node()`：跳转执行路径
+6. 需要页面探索时：
+    - 先 `session_page_snapshot()`
+    - 再 `session_page_run_script()`
+7. 验证完成后：
+    - 继续执行：`session_resume()`
+    - 放弃执行：`session_abort()`
+
+经验规则：
+- 不要先执行再补断点；优先在 `workflow_submit_*` 阶段把调试策略带上
+- 不要一开始就写页面脚本；先看 `session_page_snapshot()` 返回的 HTML / 截图
+- 不要直接猜 workflow 文件路径；优先用 `workflow_list()` 返回的逻辑名
+""".strip()
+
+
+TOOL_SELECTION_PROMPT = """
+Weboter MCP 工具选择指南。
+
+如果你不知道该用哪个工具，可以按下面分流：
+
+1. 想确认系统是否在线
+- `service_status`
+- `service_logs`
+
+2. 想找 workflow 或发起执行
+- `workflow_list`
+- `workflow_submit_managed`
+- `workflow_submit_upload`
+- `workflow_delete_managed`（仅 admin）
+
+3. 想跟踪任务结果
+- `task_list`
+- `task_get`
+- `task_logs`
+
+4. 想观察会话当前状态
+- `session_list`
+- `session_get`
+- `session_snapshots`
+- `session_workflow`
+
+5. 想让执行停住或继续
+- `workflow_submit_*` + `pause_before_start`
+- `workflow_submit_*` + `breakpoints`
+- `session_interrupt`
+- `session_pause`
+- `session_resume`
+- `session_abort`
+
+6. 想修改执行中的 workflow
+- `session_set_context`
+- `session_patch_node`
+- `session_add_node`
+- `session_jump_node`
+- `session_export_workflow`
+
+7. 想调试页面
+- `session_page_snapshot`
+- `session_page_run_script`
+
+其中：
+- `session_interrupt` 是“下一个节点前停住”
+- `session_pause` 更适合已停住状态下维持暂停，不适合抢停正在快速运行的节点
+- `session_page_run_script` 是通用页面调试入口，优先于堆很多 click/fill 类离散工具
 """.strip()
 
 
@@ -76,17 +176,19 @@ def _profile_tools(profile: str) -> set[str]:
             "session_get",
             "session_snapshots",
             "session_pause",
+            "session_interrupt",
             "session_resume",
             "session_abort",
             "session_set_context",
             "session_jump_node",
             "session_patch_node",
+            "session_add_node",
+            "session_workflow",
+            "session_update_breakpoints",
+            "session_clear_breakpoints",
             "session_export_workflow",
             "session_page_snapshot",
-            "session_page_evaluate",
-            "session_page_goto",
-            "session_page_click",
-            "session_page_fill",
+            "session_page_run_script",
         },
         "admin": {
             "service_status",
@@ -102,18 +204,19 @@ def _profile_tools(profile: str) -> set[str]:
             "session_get",
             "session_snapshots",
             "session_pause",
+            "session_interrupt",
             "session_resume",
             "session_abort",
             "session_set_context",
             "session_jump_node",
             "session_patch_node",
             "session_add_node",
+            "session_workflow",
+            "session_update_breakpoints",
+            "session_clear_breakpoints",
             "session_export_workflow",
             "session_page_snapshot",
-            "session_page_evaluate",
-            "session_page_goto",
-            "session_page_click",
-            "session_page_fill",
+            "session_page_run_script",
         },
     }
     return tool_sets.get(profile, tool_sets["operator"])
@@ -127,8 +230,18 @@ def create_mcp_server() -> FastMCP:
 
     @server.prompt()
     def quickstart() -> str:
-        """读取 Weboter 的推荐使用顺序与命名规则。"""
+        """Weboter MCP 快速上手：如何连通 service、提交 workflow、进入 session 调试。"""
         return QUICKSTART_PROMPT
+
+    @server.prompt()
+    def debug_playbook() -> str:
+        """Weboter MCP 调试手册：如何在提交前预设断点、读取第一现场、修改 workflow 并恢复执行。"""
+        return DEBUG_PLAYBOOK_PROMPT
+
+    @server.prompt()
+    def tool_selection() -> str:
+        """Weboter MCP 工具选择指南：按目标选择 service、workflow、task、session 和页面调试工具。"""
+        return TOOL_SELECTION_PROMPT
 
     def managed_workflow_directory() -> str:
         state = client.service_state()
@@ -160,16 +273,37 @@ def create_mcp_server() -> FastMCP:
 
     if "workflow_submit_upload" in enabled_tools:
         @server.tool()
-        def workflow_submit_upload(path: str, execute: bool = True) -> dict[str, Any]:
-            """上传一个 workflow 文件到 service，并可选立即提交执行。"""
-            return client.upload_workflow(Path(path), execute=execute)
+        def workflow_submit_upload(
+            path: str,
+            execute: bool = True,
+            pause_before_start: bool = False,
+            breakpoints: list[dict[str, Any]] | None = None,
+        ) -> dict[str, Any]:
+            """上传一个 workflow 文件到 service，并可选在创建 session 时预设起步即停或断点。"""
+            return client.upload_workflow(
+                Path(path),
+                execute=execute,
+                pause_before_start=pause_before_start,
+                breakpoints=breakpoints,
+            )
 
     if "workflow_submit_managed" in enabled_tools:
         @server.tool()
-        def workflow_submit_managed(name: str, directory: str | None = None) -> dict[str, Any]:
-            """从指定目录或 service 管理目录中选择 workflow，并提交执行。"""
+        def workflow_submit_managed(
+            name: str,
+            directory: str | None = None,
+            pause_before_start: bool = False,
+            breakpoints: list[dict[str, Any]] | None = None,
+        ) -> dict[str, Any]:
+            """从指定目录或 service 管理目录中选择 workflow，并在提交时预设起步即停或断点。"""
             target_directory = directory or managed_workflow_directory()
-            return client.handle_directory(target_directory, workflow_name=name, execute=True)
+            return client.handle_directory(
+                target_directory,
+                workflow_name=name,
+                execute=True,
+                pause_before_start=pause_before_start,
+                breakpoints=breakpoints,
+            )
 
     if "workflow_delete_managed" in enabled_tools:
         @server.tool()
@@ -220,6 +354,12 @@ def create_mcp_server() -> FastMCP:
             """请求暂停某个执行会话。"""
             return client.pause_session(session_id)
 
+    if "session_interrupt" in enabled_tools:
+        @server.tool()
+        def session_interrupt(session_id: str, reason: str = "interrupt_next") -> dict[str, Any]:
+            """请求在下一个节点执行前停住，用于调试时保留第一现场。"""
+            return client.interrupt_session(session_id, reason)
+
     if "session_resume" in enabled_tools:
         @server.tool()
         def session_resume(session_id: str) -> dict[str, Any]:
@@ -256,6 +396,28 @@ def create_mcp_server() -> FastMCP:
             """向执行中 workflow 动态添加一个节点。"""
             return client.add_session_node(session_id, node)
 
+    if "session_workflow" in enabled_tools:
+        @server.tool()
+        def session_workflow(session_id: str) -> dict[str, Any]:
+            """读取当前执行会话中的 workflow 定义，便于分析和动态修改。"""
+            return client.get_session_workflow(session_id)
+
+    if "session_update_breakpoints" in enabled_tools:
+        @server.tool()
+        def session_update_breakpoints(
+            session_id: str,
+            breakpoints: list[dict[str, Any]],
+            replace: bool = True,
+        ) -> dict[str, Any]:
+            """配置执行断点。断点支持 phase、node_id、node_name 和 once。"""
+            return client.configure_session_breakpoints(session_id, breakpoints, replace=replace)
+
+    if "session_clear_breakpoints" in enabled_tools:
+        @server.tool()
+        def session_clear_breakpoints(session_id: str, breakpoint_ids: list[str] | None = None) -> dict[str, Any]:
+            """清除全部断点，或按 breakpoint id 选择性清除。"""
+            return client.clear_session_breakpoints(session_id, breakpoint_ids)
+
     if "session_export_workflow" in enabled_tools:
         @server.tool()
         def session_export_workflow(session_id: str, path: str) -> dict[str, Any]:
@@ -268,29 +430,16 @@ def create_mcp_server() -> FastMCP:
             """抓取当前页面快照，返回 HTML 和截图路径。"""
             return client.get_session_page(session_id)
 
-    if "session_page_evaluate" in enabled_tools:
+    if "session_page_run_script" in enabled_tools:
         @server.tool()
-        def session_page_evaluate(session_id: str, script: str, arg: Any | None = None) -> dict[str, Any]:
-            """在当前页面执行一段 Playwright evaluate 脚本。"""
-            return client.evaluate_session_page(session_id, script, arg)
-
-    if "session_page_goto" in enabled_tools:
-        @server.tool()
-        def session_page_goto(session_id: str, url: str) -> dict[str, Any]:
-            """控制当前页面跳转到指定 URL。"""
-            return client.session_page_goto(session_id, url)
-
-    if "session_page_click" in enabled_tools:
-        @server.tool()
-        def session_page_click(session_id: str, locator: str, timeout: int = 5000) -> dict[str, Any]:
-            """控制当前页面点击指定 locator。"""
-            return client.session_page_click(session_id, locator, timeout)
-
-    if "session_page_fill" in enabled_tools:
-        @server.tool()
-        def session_page_fill(session_id: str, locator: str, value: str, timeout: int = 5000) -> dict[str, Any]:
-            """控制当前页面填写指定 locator。"""
-            return client.session_page_fill(session_id, locator, value, timeout)
+        def session_page_run_script(
+            session_id: str,
+            code: str,
+            arg: Any | None = None,
+            timeout_ms: int = 5000,
+        ) -> dict[str, Any]:
+            """执行一段受控的 Playwright 页面脚本，返回脚本结果和最新页面快照。"""
+            return client.run_session_page_script(session_id, code, arg, timeout_ms)
 
     return server
 

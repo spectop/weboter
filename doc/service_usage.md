@@ -45,6 +45,11 @@ weboter workflow --upload workflows/demo_empty.json
 weboter workflow --upload workflows/demo_empty.json --execute
 ```
 
+如果通过 HTTP API 或 MCP 提交执行，也可以在提交时直接附带调试预设：
+
+- `pause_before_start: true`：要求第一个节点执行前先停住
+- `breakpoints: [...]`：在 session 创建时就装载断点，不必等任务开始后再补发
+
 递归列出目录中的 workflow：
 
 ```bash
@@ -113,10 +118,24 @@ service 默认暴露以下接口：
 - `POST /workflow/dir`：列举、解析或执行目录中的 workflow
 - `GET /tasks` / `GET /tasks/{task_id}` / `GET /tasks/{task_id}/logs`：任务查看与日志读取
 - `GET /sessions` / `GET /sessions/{session_id}` / `GET /sessions/{session_id}/snapshots`：执行会话观察
-- `POST /sessions/{session_id}/pause|resume|abort`：执行会话控制
+- `POST /sessions/{session_id}/pause|interrupt|resume|abort`：执行会话控制，其中 `interrupt` 会在下一个节点执行前停住
 - `POST /sessions/{session_id}/context|jump|patch-node|add-node`：运行中介入 workflow
-- `GET /sessions/{session_id}/page` 及相关 `POST` 接口：页面级操作
+- `GET /sessions/{session_id}/workflow`：读取当前执行中的 workflow 定义
+- `POST /sessions/{session_id}/breakpoints` / `POST /sessions/{session_id}/breakpoints/clear`：配置或清理断点
+- `GET /sessions/{session_id}/page`、`POST /sessions/{session_id}/page/script` 及其他 `page/*` 接口：页面级调试与操作
 - `GET /openapi.json` / `GET /docs`：API 描述与调试入口
+
+### 推荐的调试组合
+
+针对 agent 调试，当前推荐的最小组合是：
+
+- `pause_before_start`：在提交 workflow 时直接要求第一个节点前停住，适合首轮调试
+- `interrupt`：请求在下一个节点执行前停住，适合会话已经启动后的追加介入
+- `breakpoints`：按 `before_step + node_id` 或 `node_name` 配置精确断点
+- `workflow`：直接读取当前会话里的 workflow 定义，便于决定 patch/add/jump
+- `page/script`：以受控 Python 代码执行 Playwright 页面操作，替代 MCP 暴露大量 `click/fill/...` 离散工具
+
+`page/script` 会使用受限内建函数、禁止 `import` / `global` / 双下划线访问，并带超时控制；执行后会返回脚本结果、最新页面快照以及额外生成的 HTML / 截图文件路径。
 
 ## 相关参考
 

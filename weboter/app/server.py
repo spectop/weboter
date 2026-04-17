@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import asdict
 import logging
 import os
@@ -7,10 +9,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
 import uvicorn
 
@@ -38,6 +40,8 @@ def _consume_secret_notice(workflow_service: WorkflowService) -> dict[str, str] 
 class WorkflowUploadRequest(BaseModel):
     path: str
     execute: bool = False
+    pause_before_start: bool = False
+    breakpoints: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class WorkflowDirectoryRequest(BaseModel):
@@ -46,6 +50,8 @@ class WorkflowDirectoryRequest(BaseModel):
     list: bool = False
     delete: bool = False
     execute: bool = False
+    pause_before_start: bool = False
+    breakpoints: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class SessionSetContextRequest(BaseModel):
@@ -55,6 +61,19 @@ class SessionSetContextRequest(BaseModel):
 
 class SessionJumpRequest(BaseModel):
     node_id: str
+
+
+class SessionInterruptRequest(BaseModel):
+    reason: str = "interrupt_next"
+
+
+class SessionConfigureBreakpointsRequest(BaseModel):
+    breakpoints: list[dict[str, Any]]
+    replace: bool = True
+
+
+class SessionClearBreakpointsRequest(BaseModel):
+    breakpoint_ids: list[str] | None = None
 
 
 class SessionPatchNodeRequest(BaseModel):
@@ -73,6 +92,12 @@ class SessionExportWorkflowRequest(BaseModel):
 class SessionPageEvaluateRequest(BaseModel):
     script: str
     arg: Any | None = None
+
+
+class SessionPageScriptRequest(BaseModel):
+    code: str
+    arg: Any | None = None
+    timeout_ms: int = 5000
 
 
 class SessionPageGotoRequest(BaseModel):
@@ -116,7 +141,7 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     api_token = service.get_api_token() or ""
     app = FastAPI(
         title="Weboter Local Service",
-        version="0.1.0",
+        version="0.1.5",
         summary="Weboter 本地 workflow 执行服务",
     )
     app.state.workflow_service = service
@@ -254,6 +279,13 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
         except Exception as exc:
             _raise_http_error(exc)
 
+    @app.post("/sessions/{session_id}/interrupt", tags=["session"])
+    def interrupt_session(session_id: str, payload: SessionInterruptRequest) -> dict[str, Any]:
+        try:
+            return session_manager.request_interrupt(session_id, payload.reason)
+        except Exception as exc:
+            _raise_http_error(exc)
+
     @app.post("/sessions/{session_id}/resume", tags=["session"])
     def resume_session(session_id: str) -> dict[str, Any]:
         try:
@@ -296,6 +328,27 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
         except Exception as exc:
             _raise_http_error(exc)
 
+    @app.get("/sessions/{session_id}/workflow", tags=["session"])
+    def session_workflow(session_id: str) -> dict[str, Any]:
+        try:
+            return session_manager.get_workflow(session_id)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/breakpoints", tags=["session"])
+    def session_breakpoints(session_id: str, payload: SessionConfigureBreakpointsRequest) -> dict[str, Any]:
+        try:
+            return session_manager.configure_breakpoints(session_id, payload.breakpoints, replace=payload.replace)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/breakpoints/clear", tags=["session"])
+    def session_clear_breakpoints(session_id: str, payload: SessionClearBreakpointsRequest) -> dict[str, Any]:
+        try:
+            return session_manager.clear_breakpoints(session_id, payload.breakpoint_ids)
+        except Exception as exc:
+            _raise_http_error(exc)
+
     @app.post("/sessions/{session_id}/export-workflow", tags=["session"])
     def session_export_workflow(session_id: str, payload: SessionExportWorkflowRequest) -> dict[str, Any]:
         try:
@@ -314,6 +367,13 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     def session_page_evaluate(session_id: str, payload: SessionPageEvaluateRequest) -> Any:
         try:
             return {"result": session_manager.page_evaluate(session_id, payload.script, payload.arg)}
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/page/script", tags=["session"])
+    def session_page_script(session_id: str, payload: SessionPageScriptRequest) -> dict[str, Any]:
+        try:
+            return session_manager.page_run_script(session_id, payload.code, payload.arg, payload.timeout_ms)
         except Exception as exc:
             _raise_http_error(exc)
 
@@ -342,14 +402,21 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     def workflow_upload(payload: WorkflowUploadRequest) -> dict[str, Any]:
         try:
             system_logger.info(
-                "workflow upload path=%s execute=%s",
+                "workflow upload path=%s execute=%s pause_before_start=%s breakpoints=%s",
                 payload.path,
                 payload.execute,
+                payload.pause_before_start,
+                len(payload.breakpoints),
             )
             if not payload.execute:
                 return service.handle_upload_request(Path(payload.path), False)
             resolution = service.upload_workflow(Path(payload.path))
-            task = task_manager.submit(resolution.source_path, trigger="upload")
+            task = task_manager.submit(
+                resolution.source_path,
+                trigger="upload",
+                pause_before_start=payload.pause_before_start,
+                breakpoints=payload.breakpoints,
+            )
             return {
                 "uploaded": str(resolution.managed_path or resolution.source_path),
                 "task": asdict(task),
@@ -361,12 +428,14 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     def workflow_dir(payload: WorkflowDirectoryRequest) -> dict[str, Any]:
         try:
             system_logger.info(
-                "workflow dir directory=%s name=%s list=%s delete=%s execute=%s",
+                "workflow dir directory=%s name=%s list=%s delete=%s execute=%s pause_before_start=%s breakpoints=%s",
                 payload.directory,
                 payload.name,
                 payload.list,
                 payload.delete,
                 payload.execute,
+                payload.pause_before_start,
+                len(payload.breakpoints),
             )
             if payload.list:
                 return service.handle_directory_request(Path(payload.directory), payload.name, True, False, False)
@@ -375,7 +444,12 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
             if not payload.execute:
                 return service.handle_directory_request(Path(payload.directory), payload.name, False, False, False)
             resolution = service.resolve_from_directory(Path(payload.directory), payload.name)
-            task = task_manager.submit(resolution.source_path, trigger="directory")
+            task = task_manager.submit(
+                resolution.source_path,
+                trigger="directory",
+                pause_before_start=payload.pause_before_start,
+                breakpoints=payload.breakpoints,
+            )
             return {
                 "resolved": str(resolution.source_path),
                 "task": asdict(task),
