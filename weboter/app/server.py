@@ -27,6 +27,131 @@ DEFAULT_SERVICE_HOST = "127.0.0.1"
 DEFAULT_SERVICE_PORT = 0
 
 
+def _process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _process_group_exists(pgid: int) -> bool:
+    if not hasattr(os, "killpg"):
+        return _process_exists(pgid)
+    try:
+        os.killpg(pgid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _read_process_cmdline(pid: int) -> list[str]:
+    cmdline_path = Path(f"/proc/{pid}/cmdline")
+    if not cmdline_path.is_file():
+        return []
+    raw = cmdline_path.read_bytes().split(b"\0")
+    return [item.decode("utf-8", errors="ignore") for item in raw if item]
+
+
+def _read_process_stat(pid: int) -> dict[str, Any] | None:
+    stat_path = Path(f"/proc/{pid}/stat")
+    if not stat_path.is_file():
+        return None
+    content = stat_path.read_text(encoding="utf-8").strip()
+    end_comm = content.rfind(")")
+    if end_comm < 0:
+        return None
+    prefix = content[:end_comm + 1]
+    suffix = content[end_comm + 2:].split()
+    if len(suffix) < 3:
+        return None
+    return {
+        "pid": pid,
+        "comm": prefix[prefix.find("(") + 1:-1],
+        "state": suffix[0],
+        "ppid": int(suffix[1]),
+        "pgid": int(suffix[2]),
+    }
+
+
+def _classify_process(cmdline: list[str], comm: str) -> str:
+    joined = " ".join(cmdline) if cmdline else comm
+    lowered = joined.lower()
+    if "playwright" in lowered:
+        return "playwright"
+    if "chrome" in lowered or "chromium" in lowered or "firefox" in lowered or "webkit" in lowered:
+        return "browser"
+    if "weboter" in lowered:
+        return "service"
+    return "other"
+
+
+def list_service_processes(workflow_service: WorkflowService | None = None) -> dict[str, Any]:
+    workflow_service = workflow_service or WorkflowService()
+    state = workflow_service.read_service_state()
+    if state is None:
+        raise RuntimeError("service 未启动")
+    if not _process_exists(state.pid):
+        workflow_service.remove_service_state()
+        raise RuntimeError("service 状态文件已过期")
+
+    processes: list[dict[str, Any]] = []
+    proc_root = Path("/proc")
+    for entry in sorted(proc_root.iterdir(), key=lambda item: int(item.name) if item.name.isdigit() else 0):
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        stat = _read_process_stat(pid)
+        if stat is None or stat["pgid"] != state.pid:
+            continue
+        cmdline = _read_process_cmdline(pid)
+        processes.append(
+            {
+                "pid": pid,
+                "ppid": stat["ppid"],
+                "pgid": stat["pgid"],
+                "state": stat["state"],
+                "comm": stat["comm"],
+                "kind": _classify_process(cmdline, stat["comm"]),
+                "cmdline": cmdline,
+            }
+        )
+
+    return {
+        "service": {
+            "pid": state.pid,
+            "host": state.host,
+            "port": state.port,
+        },
+        "items": processes,
+    }
+
+
+def _is_expected_service_process(pid: int) -> bool:
+    cmdline = _read_process_cmdline(pid)
+    if not cmdline:
+        return True
+    joined = " ".join(cmdline)
+    return "weboter" in joined and "service" in joined and "--foreground" in joined
+
+
+def _signal_service_process_tree(pid: int, sig: int) -> None:
+    if hasattr(os, "killpg"):
+        os.killpg(pid, sig)
+        return
+    os.kill(pid, sig)
+
+
+def _wait_for_service_process_exit(pid: int, timeout_seconds: float) -> bool:
+    deadline = time.time() + timeout_seconds
+    exists = _process_group_exists if hasattr(os, "killpg") else _process_exists
+    while time.time() < deadline:
+        if not exists(pid):
+            return True
+        time.sleep(0.2)
+    return not exists(pid)
+
+
 def _consume_secret_notice(workflow_service: WorkflowService) -> dict[str, str] | None:
     if not workflow_service.should_announce_secrets():
         return None
@@ -149,7 +274,7 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     api_token = service.get_api_token() or ""
     app = FastAPI(
         title="Weboter Local Service",
-        version="0.1.9",
+        version="0.1.11",
         summary="Weboter 本地 workflow 执行服务",
     )
     app.state.workflow_service = service
@@ -243,6 +368,13 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
             "log_path": str(service.service_log_path),
             "content": _tail_file(service.service_log_path, lines),
         }
+
+    @app.get("/service/processes", tags=["service"])
+    def service_processes() -> dict[str, Any]:
+        try:
+            return list_service_processes(service)
+        except Exception as exc:
+            _raise_http_error(exc)
 
     @app.get("/catalog/actions", tags=["catalog"])
     def list_actions() -> dict[str, Any]:
@@ -634,18 +766,42 @@ def stop_background_service(workflow_service: WorkflowService | None = None) -> 
     if state is None:
         raise RuntimeError("service 未启动")
 
-    os.kill(state.pid, signal.SIGTERM)
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        try:
-            os.kill(state.pid, 0)
-        except OSError:
-            workflow_service.remove_service_state()
-            return {"status": "stopped", "pid": state.pid, "host": state.host, "port": state.port}
-        time.sleep(0.2)
+    if not _process_exists(state.pid):
+        workflow_service.remove_service_state()
+        return {"status": "stopped", "pid": state.pid, "host": state.host, "port": state.port}
 
-    workflow_service.remove_service_state()
+    if not _is_expected_service_process(state.pid):
+        workflow_service.remove_service_state()
+        raise RuntimeError(f"service 状态文件中的 pid 已被其他进程占用: {state.pid}")
+
+    _signal_service_process_tree(state.pid, signal.SIGTERM)
+    if _wait_for_service_process_exit(state.pid, 5):
+        workflow_service.remove_service_state()
+        return {"status": "stopped", "pid": state.pid, "host": state.host, "port": state.port}
+
+    _signal_service_process_tree(state.pid, signal.SIGKILL)
+    if _wait_for_service_process_exit(state.pid, 2):
+        workflow_service.remove_service_state()
+        return {"status": "killed", "pid": state.pid, "host": state.host, "port": state.port}
+
     return {"status": "stop-requested", "pid": state.pid, "host": state.host, "port": state.port}
+
+
+def restart_background_service(
+    host: str,
+    port: int,
+    workflow_service: WorkflowService | None = None,
+) -> dict[str, Any]:
+    workflow_service = workflow_service or WorkflowService()
+    previous: dict[str, Any] | None = None
+    state = workflow_service.read_service_state()
+    if state is not None:
+        previous = stop_background_service(workflow_service)
+    started = start_background_service(host, port, workflow_service)
+    started["status"] = "restarted" if previous is not None else started.get("status", "started")
+    if previous is not None:
+        started["previous"] = previous
+    return started
 
 
 def service_status(workflow_service: WorkflowService | None = None) -> dict[str, Any]:

@@ -12,6 +12,7 @@ Weboter 是一个通过远程 service 执行 workflow 的 MCP adapter。
 
 使用要点：
 - 先调用 service_status，确认 service.health.status 为 ok。
+- 如果怀疑 stop 后仍有残留进程，可调用 service_processes 查看当前 service 进程组。
 - workflow_list 返回的是 service 感知的逻辑名，不带 .json 后缀；多层目录会显示为点号名，例如 pack_a.pack_b.do_sth。
 - 需要执行现有受管 workflow 时，优先使用 workflow_submit_managed(name=...)；如果要调试首个节点，直接在提交时带上 pause_before_start 或 breakpoints。
 - 需要上传本地 workflow 文件时，使用 workflow_submit_upload(path=...)；同样支持在提交时预设调试参数。
@@ -101,6 +102,7 @@ Weboter MCP 工具选择指南。
 1. 想确认系统是否在线
 - `service_status`
 - `service_logs`
+- `service_processes`
 
 2. 想找 workflow 或发起执行
 - `workflow_list`
@@ -172,6 +174,7 @@ def _profile_tools(profile: str) -> set[str]:
         "readonly": {
             "service_status",
             "service_logs",
+            "service_processes",
             "action_list",
             "action_get",
             "control_list",
@@ -190,6 +193,7 @@ def _profile_tools(profile: str) -> set[str]:
         "operator": {
             "service_status",
             "service_logs",
+            "service_processes",
             "action_list",
             "action_get",
             "control_list",
@@ -224,6 +228,7 @@ def _profile_tools(profile: str) -> set[str]:
         "admin": {
             "service_status",
             "service_logs",
+            "service_processes",
             "action_list",
             "action_get",
             "control_list",
@@ -323,6 +328,12 @@ def create_mcp_server() -> FastMCP:
         def service_logs(lines: int = 50) -> dict[str, Any]:
             """读取 Weboter service 系统日志。"""
             return client.service_logs(clamp_lines(lines))
+
+    if "service_processes" in enabled_tools:
+        @server.tool()
+        def service_processes() -> dict[str, Any]:
+            """读取当前 service 进程组中的进程列表，用于排查 Playwright 或浏览器残留进程。"""
+            return client.service_processes()
 
     if "action_list" in enabled_tools:
         @server.tool()

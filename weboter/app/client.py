@@ -106,6 +106,9 @@ class WorkflowServiceClient:
         query = urllib.parse.urlencode({"lines": lines})
         return self._request("GET", f"/service/logs?{query}")
 
+    def service_processes(self) -> dict[str, Any]:
+        return self._request("GET", "/service/processes")
+
     def service_state(self) -> dict[str, Any]:
         return self._request("GET", "/service/state")
 

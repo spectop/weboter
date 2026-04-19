@@ -4,7 +4,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "C:\\path\\to\\dist\\weboter-0.1.9-py3-none-any.whl",
+        "C:\\path\\to\\dist\\weboter-0.1.11-py3-none-any.whl",
         "weboter-mcp"
       ],
       "env": {

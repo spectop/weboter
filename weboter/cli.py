@@ -18,6 +18,8 @@ DEFAULT_SERVICE_PORT = 0
 def _load_local_service_stack() -> tuple:
     try:
         from weboter.app.server import (
+            list_service_processes,
+            restart_background_service,
             serve_foreground,
             service_status,
             start_background_service,
@@ -29,7 +31,7 @@ def _load_local_service_stack() -> tuple:
         raise RuntimeError(
             "当前安装不包含本地 service / 执行器依赖；请重新安装 `python -m pip install -e '.[service]'`"
         ) from exc
-    return WorkflowService, TaskManager, serve_foreground, service_status, start_background_service, stop_background_service
+    return WorkflowService, TaskManager, serve_foreground, service_status, start_background_service, stop_background_service, restart_background_service, list_service_processes
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -60,14 +62,16 @@ def build_parser() -> argparse.ArgumentParser:
             """
             示例:
               weboter service start
+                            weboter service restart
               weboter service status --json
+                            weboter service ps
               weboter service logs --lines 100
               weboter service stop
             """
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    service_parser.add_argument("action", choices=["start", "stop", "status", "logs"])
+    service_parser.add_argument("action", choices=["start", "restart", "stop", "status", "logs", "ps"])
     service_parser.add_argument("--host", default=None, help=f"service 监听地址，默认读取配置文件（当前 {config.service.host}）")
     service_parser.add_argument("--port", type=int, default=None, help=f"service 监听端口，默认读取配置文件（当前 {config.service.port}）")
     service_parser.add_argument("--lines", type=int, default=200, help="查看日志时输出的最后行数")
@@ -235,13 +239,13 @@ def _print_result(result: dict, json_output: bool = False) -> None:
         for key, value in secret_notice.items():
             print(f"- {key}: {value}")
 
-    if result.get("status") in {"started", "already-running"}:
+    if result.get("status") in {"started", "already-running", "restarted"}:
         print(f"service {result['status']}: pid={result.get('pid')} {result.get('host')}:{result.get('port')}")
         return
     if result.get("status") in {"running"}:
         print(f"service running: pid={result.get('pid')} {result.get('host')}:{result.get('port')}")
         return
-    if result.get("status") in {"stopped", "stop-requested"}:
+    if result.get("status") in {"stopped", "stop-requested", "killed"}:
         print(f"service {result['status']}: pid={result.get('pid')}")
         return
     if "task_id" in result and "status" in result:
@@ -272,6 +276,11 @@ def _print_result(result: dict, json_output: bool = False) -> None:
         print(f"log: {result['log_path']}")
         if result.get("content"):
             print(result["content"])
+        return
+    if "items" in result and result["items"] and isinstance(result["items"][0], dict) and "pgid" in result["items"][0]:
+        for item in result["items"]:
+            cmdline = " ".join(item.get("cmdline") or []) or item.get("comm") or ""
+            print(f"{item['pid']}  ppid={item['ppid']}  pgid={item['pgid']}  state={item['state']}  kind={item.get('kind')}  {cmdline}")
         return
 
     if "uploaded" in result:
@@ -325,7 +334,7 @@ def main() -> int:
 
     if args.command == "service":
         try:
-            WorkflowService, _, serve_foreground, service_status, start_background_service, stop_background_service = _load_local_service_stack()
+            WorkflowService, _, serve_foreground, service_status, start_background_service, stop_background_service, restart_background_service, list_service_processes = _load_local_service_stack()
         except RuntimeError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
@@ -339,6 +348,17 @@ def main() -> int:
                     return serve_foreground(host, port, workflow_service)
                 _print_result(start_background_service(host, port, workflow_service), args.json)
                 return 0
+            if args.action == "restart":
+                current_state = workflow_service.read_service_state()
+                host = args.host or (current_state.host if current_state and current_state.host else config.service.host or DEFAULT_SERVICE_HOST)
+                if args.port is not None:
+                    port = args.port
+                elif current_state and current_state.port:
+                    port = current_state.port
+                else:
+                    port = config.service.port
+                _print_result(restart_background_service(host, port, workflow_service), args.json)
+                return 0
             if args.action == "stop":
                 _print_result(stop_background_service(workflow_service), args.json)
                 return 0
@@ -350,6 +370,12 @@ def main() -> int:
                     _print_result(client.service_logs(args.lines), args.json)
                 except ServiceClientError:
                     _print_result(_tail_local_file(workflow_service.service_log_path, args.lines), args.json)
+                return 0
+            if args.action == "ps":
+                try:
+                    _print_result(client.service_processes(), args.json)
+                except ServiceClientError:
+                    _print_result(list_service_processes(workflow_service), args.json)
                 return 0
         except (RuntimeError, ServiceClientError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
