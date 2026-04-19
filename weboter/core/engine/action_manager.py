@@ -1,3 +1,5 @@
+from dataclasses import asdict
+
 from weboter.public.contracts.action import ActionBase
 
 class ActionPackage:
@@ -99,6 +101,39 @@ class ActionManager:
             return None
         package = self._packages[package_name]
         return package.get_action(action_name)
+
+    def list_actions(self) -> list[dict]:
+        items: list[dict] = []
+        for package_name, package in sorted(self._packages.items()):
+            for action_name, action in sorted(package.actions.items()):
+                items.append(self._describe_action(package_name, action_name, action))
+        return items
+
+    def describe_action(self, full_name: str) -> dict | None:
+        if '.' in full_name:
+            package_name, action_name = full_name.split('.', 1)
+        else:
+            package_name = "builtin"
+            action_name = full_name
+        package = self._packages.get(package_name)
+        if package is None:
+            return None
+        action = package.get_action(action_name)
+        if action is None:
+            return None
+        return self._describe_action(package_name, action_name, action)
+
+    def _describe_action(self, package_name: str, action_name: str, action: ActionBase) -> dict:
+        full_name = f"{package_name}.{action_name}" if package_name else action_name
+        return {
+            "kind": "action",
+            "package": package_name,
+            "name": action_name,
+            "full_name": full_name,
+            "description": getattr(action, "description", "") or "",
+            "inputs": [asdict(item) for item in getattr(action, "inputs", [])],
+            "outputs": [asdict(item) for item in getattr(action, "outputs", [])],
+        }
 
 
 action_manager = ActionManager()

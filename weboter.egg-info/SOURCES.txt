@@ -1,6 +1,7 @@
 LICENSE
 README.md
 pyproject.toml
+tests/test_contract_catalog.py
 tests/test_session_debug.py
 weboter/__main__.py
 weboter/cli.py

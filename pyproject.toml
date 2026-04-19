@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weboter"
-version = "0.1.5"
+version = "0.1.9"
 description = "Config-driven browser workflow automation"
 readme = "README.md"
 requires-python = ">=3.11"

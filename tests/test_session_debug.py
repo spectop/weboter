@@ -35,7 +35,7 @@ class _FakeRuntime:
         self.current_node_id = node.node_id
         self.data_context = _FakeDataContext()
         self.nodes = {node.node_id: node}
-        self._values = {}
+        self._values = {"$flow{form}": {"name": "alice", "roles": ["admin", "operator"]}}
         if page is not None:
             self._values["$global{{current_page}}"] = page
 
@@ -155,8 +155,9 @@ class SessionDebugTests(unittest.IsolatedAsyncioTestCase):
                 timeout_ms=1000,
             )
 
-        self.assertEqual(result["result"]["url"], "https://example.com")
-        self.assertEqual(result["result"]["arg"], {"mode": "debug"})
+        self.assertEqual(result["result"]["type"], "dict")
+        self.assertEqual(result["result"]["items"]["url"], "https://example.com")
+        self.assertEqual(result["result"]["items"]["arg"]["type"], "dict")
         self.assertEqual(result["snapshot"]["phase"], "page_script")
         self.assertTrue(Path(result["page"]["html_path"]).is_file())
         self.assertTrue(Path(result["page"]["screenshot_path"]).is_file())
@@ -164,3 +165,52 @@ class SessionDebugTests(unittest.IsolatedAsyncioTestCase):
     async def test_page_script_rejects_import(self):
         with self.assertRaisesRegex(ValueError, "Import"):
             self.session._compile_page_script("import os\nreturn 1")
+
+    async def test_snapshot_list_returns_summary_only(self):
+        executor = _FakeExecutor(self.flow, self.node)
+        await self.session.capture_snapshot(executor, phase="before_step", node=self.node)
+
+        items = self.manager.get_snapshots(self.session.record.session_id, limit=5)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["phase"], "before_step")
+        self.assertIn("available_sections", items[0])
+        self.assertNotIn("runtime", items[0])
+        self.assertNotIn("workflow", items[0])
+
+    async def test_snapshot_detail_returns_requested_sections_only(self):
+        executor = _FakeExecutor(self.flow, self.node)
+        await self.session.capture_snapshot(executor, phase="before_step", node=self.node)
+
+        detail = self.manager.get_snapshot_detail(
+            self.session.record.session_id,
+            1,
+            sections=["runtime", "node"],
+        )
+
+        self.assertIn("sections", detail)
+        self.assertEqual(set(detail["sections"].keys()), {"runtime", "node"})
+        self.assertNotIn("workflow", detail["sections"])
+
+    async def test_workflow_summary_and_node_detail_are_split(self):
+        executor = _FakeExecutor(self.flow, self.node)
+        self.session._active_executor = executor
+
+        summary = self.session.describe_workflow()
+        detail = self.session.describe_workflow_node("node-1")
+
+        self.assertEqual(summary["workflow"]["node_count"], 1)
+        self.assertEqual(summary["workflow"]["nodes"][0]["node_id"], "node-1")
+        self.assertNotIn("inputs", summary["workflow"]["nodes"][0])
+        self.assertEqual(detail["node"]["node_id"], "node-1")
+        self.assertIn("inputs", detail["node"])
+
+    async def test_runtime_value_returns_preview(self):
+        executor = _FakeExecutor(self.flow, self.node)
+        self.session._active_executor = executor
+
+        result = self.session.describe_runtime_value("$flow{form}")
+
+        self.assertEqual(result["key"], "$flow{form}")
+        self.assertEqual(result["value"]["type"], "dict")
+        self.assertIn("items", result["value"])

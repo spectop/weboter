@@ -86,12 +86,12 @@ def build_parser() -> argparse.ArgumentParser:
             """
             示例:
               weboter workflow --list
-                            weboter workflow --show --name demo_empty
-                            weboter workflow --delete --name demo_empty
+                                                        weboter workflow demo_empty --show
+                                                        weboter workflow demo_empty --delete
               weboter workflow --upload workflows/demo_empty.json
-              weboter workflow --name demo_empty --execute --wait
-                            weboter workflow --name pack_a.pack_b.do_sth --execute
-              weboter workflow --dir workflows --name demo_empty --execute --json
+                            weboter workflow demo_empty --execute --wait
+                                                        weboter workflow pack_a.pack_b.do_sth --execute
+                            weboter workflow demo_empty --dir workflows --execute --json
               weboter workflow --dir workflows --list --local
             """
         ),
@@ -100,10 +100,13 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_parser.add_argument("--upload", type=Path, help="上传单个 workflow 文件到本地 service 目录")
     workflow_parser.add_argument("--dir", dest="directory", type=Path, help="从指定目录读取 workflow")
     workflow_parser.add_argument("--name", help="目录模式下选择 workflow 逻辑名，例如 demo_empty 或 pack_a.pack_b.do_sth")
+    workflow_parser.add_argument("workflow_name", nargs="?", help="workflow 逻辑名，也可用 --name 指定")
     workflow_parser.add_argument("--list", action="store_true", help="递归列出目录中的 workflow 逻辑名")
     workflow_parser.add_argument("--show", action="store_true", help="查看某个 workflow 的解析结果")
     workflow_parser.add_argument("--delete", action="store_true", help="删除某个 workflow 文件")
     workflow_parser.add_argument("--execute", action="store_true", help="解析后立即执行 workflow")
+    workflow_parser.add_argument("--pause-before-start", action="store_true", help="提交执行时要求在第一个节点前停住")
+    workflow_parser.add_argument("--breakpoints", help="提交执行时预设断点，支持 JSON 字符串或 @文件路径")
     workflow_parser.add_argument("--wait", action="store_true", help="提交执行任务后等待任务结束")
     workflow_parser.add_argument("--timeout", type=float, default=0, help="等待任务完成的超时时间，0 表示不限")
     workflow_parser.add_argument("--local", action="store_true", help="不经过后台 service，直接在当前进程执行")
@@ -117,6 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
             """
             示例:
               weboter task list
+              weboter task get <task_id>
               weboter task show <task_id>
                             weboter task show 3d61013
               weboter task logs <task_id> --lines 100
@@ -125,14 +129,99 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    task_parser.add_argument("action", choices=["list", "show", "logs", "wait"])
+    task_parser.add_argument("action", choices=["list", "get", "show", "logs", "wait"])
     task_parser.add_argument("task_id", nargs="?", help="任务 ID")
     task_parser.add_argument("--limit", type=int, default=20, help="任务列表数量")
     task_parser.add_argument("--lines", type=int, default=200, help="查看日志时输出的最后行数")
     task_parser.add_argument("--timeout", type=float, default=0, help="等待任务完成的超时时间，0 表示不限")
     task_parser.add_argument("--json", action="store_true", help="以 JSON 输出任务结果")
 
+    session_parser = subparsers.add_parser(
+        "session",
+        help="查看和控制执行会话",
+        description="查看执行会话、快照、workflow 摘要，并对运行中的 session 执行调试操作。",
+        epilog=textwrap.dedent(
+            """
+            示例:
+              weboter session list
+              weboter session get <session_id>
+              weboter session snapshots <session_id> --limit 10
+              weboter session snapshot-detail <session_id> --snapshot-index 3 --sections runtime,page
+              weboter session workflow <session_id>
+              weboter session workflow-node-detail <session_id> --node-id login
+              weboter session runtime-value <session_id> --key '$flow{form}'
+              weboter session update-breakpoints <session_id> --breakpoints '[{"phase":"before_step","node_id":"login"}]'
+              weboter session page-run-script <session_id> --code @script.py --arg '{"mode":"debug"}'
+              weboter session resume <session_id>
+            """
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    session_parser.add_argument(
+        "action",
+        choices=[
+            "list",
+            "get",
+            "snapshots",
+            "snapshot-detail",
+            "pause",
+            "interrupt",
+            "resume",
+            "abort",
+            "set-context",
+            "jump-node",
+            "patch-node",
+            "add-node",
+            "workflow",
+            "workflow-node-detail",
+            "runtime-value",
+            "update-breakpoints",
+            "clear-breakpoints",
+            "export-workflow",
+            "page-snapshot",
+            "page-run-script",
+        ],
+    )
+    session_parser.add_argument("session_id", nargs="?", help="会话 ID")
+    session_parser.add_argument("--limit", type=int, default=20, help="列表或快照摘要的返回数量")
+    session_parser.add_argument("--snapshot-index", type=int, help="快照索引")
+    session_parser.add_argument("--sections", help="逗号分隔的详情 section，例如 runtime,page")
+    session_parser.add_argument("--reason", default="interrupt_next", help="interrupt 的原因")
+    session_parser.add_argument("--key", help="上下文或 runtime key")
+    session_parser.add_argument("--value", help="JSON 值，或无法解析 JSON 时按字符串处理")
+    session_parser.add_argument("--node-id", help="节点 ID")
+    session_parser.add_argument("--patch", help="节点 patch JSON，或 @文件路径")
+    session_parser.add_argument("--node", help="节点定义 JSON，或 @文件路径")
+    session_parser.add_argument("--breakpoints", help="断点 JSON 数组，或 @文件路径")
+    session_parser.add_argument("--breakpoint-ids", help="逗号分隔的 breakpoint id 列表")
+    session_parser.add_argument("--append", action="store_true", help="update-breakpoints 时以追加模式工作，而不是替换")
+    session_parser.add_argument("--path", help="导出 workflow 的目标路径")
+    session_parser.add_argument("--code", help="页面脚本内容，或 @文件路径")
+    session_parser.add_argument("--arg", help="页面脚本参数 JSON，或无法解析 JSON 时按字符串处理")
+    session_parser.add_argument("--timeout-ms", type=int, default=5000, help="页面脚本超时，单位毫秒")
+    session_parser.add_argument("--json", action="store_true", help="以 JSON 输出会话结果")
+
     return parser
+
+
+def _load_text_arg(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    if raw.startswith("@"):
+        return Path(raw[1:]).expanduser().read_text(encoding="utf-8")
+    return raw
+
+
+def _load_json_arg(raw: str | None, *, allow_plain_string: bool = False):
+    text = _load_text_arg(raw)
+    if text is None:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        if allow_plain_string:
+            return text
+        raise ValueError(f"无法解析 JSON 参数: {raw}")
 
 
 def _print_result(result: dict, json_output: bool = False) -> None:
@@ -174,6 +263,10 @@ def _print_result(result: dict, json_output: bool = False) -> None:
     if "items" in result and result["items"] and isinstance(result["items"][0], dict) and "task_id" in result["items"][0]:
         for item in result["items"]:
             print(f"{item['task_id']}  {item['status']}  {item['workflow_name']}  {item['created_at']}")
+        return
+    if "items" in result and result["items"] and isinstance(result["items"][0], dict) and "session_id" in result["items"][0]:
+        for item in result["items"]:
+            print(f"{item['session_id']}  {item.get('status')}  {item.get('current_phase')}  {item.get('current_node_id')}")
         return
     if "content" in result and "log_path" in result:
         print(f"log: {result['log_path']}")
@@ -284,7 +377,7 @@ def main() -> int:
                 return 0
             if not args.task_id:
                 parser.error("task 命令除 list 外必须提供 task_id")
-            if args.action == "show":
+            if args.action in {"get", "show"}:
                 try:
                     _print_result(client.get_task(args.task_id), args.json)
                 except ServiceClientError:
@@ -307,22 +400,139 @@ def main() -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 2
 
+    if args.command == "session":
+        client = WorkflowServiceClient()
+        try:
+            if args.action == "list":
+                _print_result(client.list_sessions(args.limit), args.json)
+                return 0
+
+            if not args.session_id:
+                parser.error("session 命令除 list 外必须提供 session_id")
+
+            if args.action == "get":
+                _print_result(client.get_session(args.session_id), args.json)
+                return 0
+            if args.action == "snapshots":
+                _print_result(client.get_session_snapshots(args.session_id, args.limit), args.json)
+                return 0
+            if args.action == "snapshot-detail":
+                if args.snapshot_index is None:
+                    parser.error("session snapshot-detail 需要 --snapshot-index")
+                sections = [item.strip() for item in (args.sections or "").split(",") if item.strip()] or None
+                _print_result(client.get_session_snapshot_detail(args.session_id, args.snapshot_index, sections), args.json)
+                return 0
+            if args.action == "pause":
+                _print_result(client.pause_session(args.session_id), args.json)
+                return 0
+            if args.action == "interrupt":
+                _print_result(client.interrupt_session(args.session_id, args.reason), args.json)
+                return 0
+            if args.action == "resume":
+                _print_result(client.resume_session(args.session_id), args.json)
+                return 0
+            if args.action == "abort":
+                _print_result(client.abort_session(args.session_id), args.json)
+                return 0
+            if args.action == "set-context":
+                if not args.key:
+                    parser.error("session set-context 需要 --key")
+                _print_result(client.set_session_context(args.session_id, args.key, _load_json_arg(args.value, allow_plain_string=True)), args.json)
+                return 0
+            if args.action == "jump-node":
+                if not args.node_id:
+                    parser.error("session jump-node 需要 --node-id")
+                _print_result(client.jump_session_node(args.session_id, args.node_id), args.json)
+                return 0
+            if args.action == "patch-node":
+                if not args.node_id or not args.patch:
+                    parser.error("session patch-node 需要 --node-id 和 --patch")
+                _print_result(client.patch_session_node(args.session_id, args.node_id, _load_json_arg(args.patch)), args.json)
+                return 0
+            if args.action == "add-node":
+                if not args.node:
+                    parser.error("session add-node 需要 --node")
+                _print_result(client.add_session_node(args.session_id, _load_json_arg(args.node)), args.json)
+                return 0
+            if args.action == "workflow":
+                _print_result(client.get_session_workflow(args.session_id), args.json)
+                return 0
+            if args.action == "workflow-node-detail":
+                if not args.node_id:
+                    parser.error("session workflow-node-detail 需要 --node-id")
+                _print_result(client.get_session_workflow_node(args.session_id, args.node_id), args.json)
+                return 0
+            if args.action == "runtime-value":
+                if not args.key:
+                    parser.error("session runtime-value 需要 --key")
+                _print_result(client.get_session_runtime_value(args.session_id, args.key), args.json)
+                return 0
+            if args.action == "update-breakpoints":
+                if not args.breakpoints:
+                    parser.error("session update-breakpoints 需要 --breakpoints")
+                _print_result(
+                    client.configure_session_breakpoints(
+                        args.session_id,
+                        _load_json_arg(args.breakpoints),
+                        replace=not args.append,
+                    ),
+                    args.json,
+                )
+                return 0
+            if args.action == "clear-breakpoints":
+                breakpoint_ids = [item.strip() for item in (args.breakpoint_ids or "").split(",") if item.strip()] or None
+                _print_result(client.clear_session_breakpoints(args.session_id, breakpoint_ids), args.json)
+                return 0
+            if args.action == "export-workflow":
+                if not args.path:
+                    parser.error("session export-workflow 需要 --path")
+                _print_result(client.export_session_workflow(args.session_id, args.path), args.json)
+                return 0
+            if args.action == "page-snapshot":
+                _print_result(client.get_session_page(args.session_id), args.json)
+                return 0
+            if args.action == "page-run-script":
+                if not args.code:
+                    parser.error("session page-run-script 需要 --code")
+                _print_result(
+                    client.run_session_page_script(
+                        args.session_id,
+                        _load_text_arg(args.code) or "",
+                        _load_json_arg(args.arg, allow_plain_string=True),
+                        args.timeout_ms,
+                    ),
+                    args.json,
+                )
+                return 0
+        except (ServiceClientError, FileNotFoundError, ValueError, TimeoutError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+
     if args.command != "workflow":
         parser.print_help()
         return 1
 
     if args.upload and args.directory:
         parser.error("workflow 命令不能同时指定 --upload 和 --dir")
+    if args.name and args.workflow_name and args.name != args.workflow_name:
+        parser.error("workflow 名称不能同时通过位置参数和 --name 指定为不同值")
+    workflow_name = args.name or args.workflow_name
     if sum([bool(args.list), bool(args.show), bool(args.delete), bool(args.execute)]) > 1:
         parser.error("workflow 命令的 --list、--show、--delete、--execute 只能选择一个")
     if args.delete and args.upload:
         parser.error("workflow 删除不能和 --upload 一起使用")
     if args.wait and not args.execute:
         parser.error("--wait 只能和 --execute 一起使用")
-    if (args.show or args.delete or args.execute) and not args.name:
-        parser.error("--show、--delete、--execute 模式需要通过 --name 指定 workflow")
-    if not args.upload and not any([args.directory, args.list, args.name, args.show, args.delete, args.execute]):
+    if (args.pause_before_start or args.breakpoints) and not args.execute:
+        parser.error("--pause-before-start 和 --breakpoints 只能和 --execute 一起使用")
+    if (args.show or args.delete or args.execute) and not workflow_name:
+        parser.error("--show、--delete、--execute 模式需要通过位置参数或 --name 指定 workflow")
+    if args.local and (args.pause_before_start or args.breakpoints):
+        parser.error("--local 模式不支持 --pause-before-start 或 --breakpoints，因为本地执行不会创建 session")
+    if not args.upload and not any([args.directory, args.list, workflow_name, args.show, args.delete, args.execute]):
         parser.error("workflow 命令至少需要一个操作，例如 --list、--upload、--show、--delete 或 --execute")
+
+    workflow_breakpoints = _load_json_arg(args.breakpoints) if args.breakpoints else None
 
     service = None
     client = WorkflowServiceClient()
@@ -351,7 +561,12 @@ def main() -> int:
             if args.local or (service is not None and not args.execute):
                 _print_result(service.handle_upload_request(args.upload, args.execute), args.json)
             else:
-                result = client.upload_workflow(args.upload, args.execute)
+                result = client.upload_workflow(
+                    args.upload,
+                    args.execute,
+                    pause_before_start=args.pause_before_start,
+                    breakpoints=workflow_breakpoints,
+                )
                 _print_result(result, args.json)
                 if args.wait and result.get("task"):
                     _print_result(client.wait_for_task(result["task"]["task_id"], args.timeout), args.json)
@@ -359,22 +574,30 @@ def main() -> int:
 
         if args.list:
             if args.local or (service is not None and not args.execute):
-                _print_result(service.handle_directory_request(workflow_directory, args.name, True, False, False), args.json)
+                _print_result(service.handle_directory_request(workflow_directory, workflow_name, True, False, False), args.json)
             else:
-                _print_result(client.handle_directory(workflow_directory, args.name, True, False, False), args.json)
+                _print_result(client.handle_directory(workflow_directory, workflow_name, True, False, False), args.json)
             return 0
 
         if args.delete:
             if args.local or (service is not None and not args.execute):
-                _print_result(service.handle_directory_request(workflow_directory, args.name, False, True, False), args.json)
+                _print_result(service.handle_directory_request(workflow_directory, workflow_name, False, True, False), args.json)
             else:
-                _print_result(client.handle_directory(workflow_directory, args.name, False, True, False), args.json)
+                _print_result(client.handle_directory(workflow_directory, workflow_name, False, True, False), args.json)
             return 0
 
         if args.local or (service is not None and not args.execute):
-            _print_result(service.handle_directory_request(workflow_directory, args.name, False, False, args.execute), args.json)
+            _print_result(service.handle_directory_request(workflow_directory, workflow_name, False, False, args.execute), args.json)
         else:
-            result = client.handle_directory(workflow_directory, args.name, False, False, args.execute)
+            result = client.handle_directory(
+                workflow_directory,
+                workflow_name,
+                False,
+                False,
+                args.execute,
+                pause_before_start=args.pause_before_start,
+                breakpoints=workflow_breakpoints,
+            )
             _print_result(result, args.json)
             if args.wait and result.get("task"):
                 _print_result(client.wait_for_task(result["task"]["task_id"], args.timeout), args.json)
@@ -385,3 +608,7 @@ def main() -> int:
             message = f"{message}；可先执行 `weboter service start`，或临时使用 `--local`"
         print(f"error: {message}", file=sys.stderr)
         return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

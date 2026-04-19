@@ -10,6 +10,8 @@ from typing import Any
 from weboter.app.config import AppConfig, load_app_config
 from weboter.app.state import ServiceState, default_workspace_root
 from weboter.core.bootstrap import ensure_builtin_packages_registered
+from weboter.core.engine.action_manager import action_manager
+from weboter.core.engine.control_manager import control_manager
 from weboter.core.engine.excutor import Executor
 from weboter.core.workflow_io import WorkflowReader
 
@@ -168,6 +170,41 @@ class WorkflowService:
         executor.load_workflow(flow)
         asyncio.run(executor.run())
         return workflow_path
+
+    def list_actions(self) -> dict[str, Any]:
+        ensure_builtin_packages_registered()
+        items = [self._summarize_contract_item(item) for item in action_manager.list_actions()]
+        return {"items": items}
+
+    def get_action(self, full_name: str) -> dict[str, Any] | None:
+        ensure_builtin_packages_registered()
+        item = action_manager.describe_action(full_name)
+        if item is None:
+            return None
+        return {"action": item}
+
+    def list_controls(self) -> dict[str, Any]:
+        ensure_builtin_packages_registered()
+        items = [self._summarize_contract_item(item) for item in control_manager.list_controls()]
+        return {"items": items}
+
+    def get_control(self, full_name: str) -> dict[str, Any] | None:
+        ensure_builtin_packages_registered()
+        item = control_manager.describe_control(full_name)
+        if item is None:
+            return None
+        return {"control": item}
+
+    def _summarize_contract_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "kind": item["kind"],
+            "package": item["package"],
+            "name": item["name"],
+            "full_name": item["full_name"],
+            "description": item["description"],
+            "input_count": len(item.get("inputs", [])),
+            "output_count": len(item.get("outputs", [])),
+        }
 
     def handle_upload_request(self, source: Path, execute: bool = False) -> dict[str, Any]:
         resolution = self.upload_workflow(source)

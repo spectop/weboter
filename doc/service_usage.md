@@ -45,6 +45,18 @@ weboter workflow --upload workflows/demo_empty.json
 weboter workflow --upload workflows/demo_empty.json --execute
 ```
 
+提交时直接要求在第一个节点前停住：
+
+```bash
+weboter workflow --dir workflows --name demo_empty --execute --pause-before-start
+```
+
+提交时预设断点：
+
+```bash
+weboter workflow --dir workflows --name demo_empty --execute --breakpoints '[{"phase":"before_step","node_id":"login"}]'
+```
+
 如果通过 HTTP API 或 MCP 提交执行，也可以在提交时直接附带调试预设：
 
 - `pause_before_start: true`：要求第一个节点执行前先停住
@@ -79,12 +91,39 @@ weboter workflow --dir workflows --name demo_empty --execute --json
 
 ```bash
 weboter task list
+weboter task get <task_id>
 weboter task show <task_id>
 weboter task logs <task_id> --lines 100
 weboter task wait <task_id>
 ```
 
 `task_id` 支持唯一前缀匹配。
+
+`task get` 是与 MCP `task_get` 对齐的新命令名，`task show` 仍保留为兼容别名。
+
+## Session 命令
+
+CLI 现在提供与 MCP `session_*` 基本对应的会话操作入口：
+
+```bash
+weboter session list
+weboter session get <session_id>
+weboter session snapshots <session_id> --limit 10
+weboter session snapshot-detail <session_id> --snapshot-index 0 --sections runtime,page
+weboter session workflow <session_id>
+weboter session workflow-node-detail <session_id> --node-id login
+weboter session runtime-value <session_id> --key '$flow{form}'
+weboter session update-breakpoints <session_id> --breakpoints '[{"phase":"before_step","node_id":"login"}]'
+weboter session interrupt <session_id>
+weboter session resume <session_id>
+weboter session page-snapshot <session_id>
+weboter session page-run-script <session_id> --code @script.py --arg '{"mode":"debug"}'
+```
+
+复杂参数统一支持两种写法：
+
+- 直接传 JSON 字符串
+- 传 `@文件路径`，由 CLI 读取文件内容后再解析
 
 ## 本地模式
 
@@ -114,6 +153,8 @@ service 默认暴露以下接口：
 - `GET /health`：存活检查
 - `GET /service/state`：读取 service 元数据
 - `GET /service/logs`：读取系统日志
+- `GET /catalog/actions` / `GET /catalog/actions/{full_name}`：读取 action 摘要与单项参数契约
+- `GET /catalog/controls` / `GET /catalog/controls/{full_name}`：读取 control 摘要与单项参数契约
 - `POST /workflow/upload`：上传并可选执行 workflow
 - `POST /workflow/dir`：列举、解析或执行目录中的 workflow
 - `GET /tasks` / `GET /tasks/{task_id}` / `GET /tasks/{task_id}/logs`：任务查看与日志读取
@@ -129,6 +170,7 @@ service 默认暴露以下接口：
 
 针对 agent 调试，当前推荐的最小组合是：
 
+- `catalog/actions` / `catalog/controls`：先确认环境里可用的 action / control，再按单项读取参数契约
 - `pause_before_start`：在提交 workflow 时直接要求第一个节点前停住，适合首轮调试
 - `interrupt`：请求在下一个节点执行前停住，适合会话已经启动后的追加介入
 - `breakpoints`：按 `before_step + node_id` 或 `node_name` 配置精确断点

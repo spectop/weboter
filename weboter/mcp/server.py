@@ -15,7 +15,11 @@ Weboter 是一个通过远程 service 执行 workflow 的 MCP adapter。
 - workflow_list 返回的是 service 感知的逻辑名，不带 .json 后缀；多层目录会显示为点号名，例如 pack_a.pack_b.do_sth。
 - 需要执行现有受管 workflow 时，优先使用 workflow_submit_managed(name=...)；如果要调试首个节点，直接在提交时带上 pause_before_start 或 breakpoints。
 - 需要上传本地 workflow 文件时，使用 workflow_submit_upload(path=...)；同样支持在提交时预设调试参数。
+- 如果不确定环境里有哪些 action / control，先调用 action_list、control_list 看摘要，再用 action_get、control_get 读取单项参数契约。
 - task_* 用于查看任务结果和日志；session_* 用于运行中介入、观察快照、配置断点、修改 workflow 和执行通用页面脚本。
+- `session_snapshots` 默认只返回快照摘要和可获取 section；需要详细内容时，再调用 `session_snapshot_detail` 按 section 展开。
+- `session_workflow` 默认只返回 workflow 摘要和有限节点列表；需要某个节点的完整定义时，再调用 `session_workflow_node_detail`。
+- 日志类与列表类工具在 MCP 层默认只返回较小窗口；如果需要更多，再显式提高参数或分批读取。
 - 默认不要猜测磁盘上的真实文件路径；优先依赖 workflow_list 返回的逻辑名。
 - 如果只需要观察，使用只读工具；涉及执行、页面脚本或 workflow 修改时，再使用 operator/admin 能力。
 - `pause` 适合让已停住的会话继续保持暂停；真正想“停在第一个节点前”时，应优先在 workflow_submit_* 阶段传入 `pause_before_start=True`。
@@ -32,13 +36,15 @@ QUICKSTART_PROMPT = """
 4. 如果你要调试首个节点，提交时直接传 `pause_before_start=True`；如果你要停在特定节点前，提交时直接传 `breakpoints=[{"phase": "before_step", "node_id": "..."}]`。
 5. 提交结果里的 `task.session_id` 就是本次会话 ID，不需要等任务跑完再查 session。
 6. 用 task_get、task_logs 跟踪任务状态；如果 session 已停住，再用 session_get、session_snapshots、session_workflow 读取第一现场。
-7. 需要改流程时，优先用 session_patch_node、session_add_node、session_jump_node、session_set_context。
-8. 需要页面调试时，优先用 session_page_snapshot 获取 HTML/截图，再用 session_page_run_script 执行受控 Playwright 脚本。
-9. 修改完成后用 session_resume 恢复，或用 session_abort 终止。
+7. 如果不确定某个 action / control 需要什么参数，先用 action_get / control_get 读取契约，再决定如何 patch workflow。
+8. 需要改流程时，优先用 session_patch_node、session_add_node、session_jump_node、session_set_context。
+9. 需要页面调试时，优先用 session_page_snapshot 获取 HTML/截图，再用 session_page_run_script 执行受控 Playwright 脚本。
+10. 修改完成后用 session_resume 恢复，或用 session_abort 终止。
 
 典型 debug 流程：
 - 停在开始前：`workflow_submit_managed(name="demo", pause_before_start=True)`
 - 停在指定节点前：`workflow_submit_managed(name="demo", breakpoints=[{"phase": "before_step", "node_id": "login"}])`
+- 查 action / control 契约：`action_list()` -> `action_get("builtin.OpenPage")` / `control_get("builtin.NextNode")`
 - 读取上下文：`session_get(session_id)` + `session_snapshots(session_id)` + `session_workflow(session_id)`
 - 调页面：先 `session_page_snapshot(session_id)`，再 `session_page_run_script(session_id, code=...)`
 - 改流程：`session_patch_node(...)` / `session_add_node(...)` / `session_jump_node(...)`
@@ -47,6 +53,7 @@ QUICKSTART_PROMPT = """
 命名规则：
 - workflow 名称不带 .json。
 - 多层目录映射为点号名称，例如 pack_a/pack_b/do_sth.json -> pack_a.pack_b.do_sth。
+- 默认遵循渐进式披露：先读摘要，再按节点、section 或 key 取详情，避免一次性拉取巨量上下文。
 """.strip()
 
 
@@ -80,6 +87,7 @@ Weboter MCP 调试手册。
 
 经验规则：
 - 不要先执行再补断点；优先在 `workflow_submit_*` 阶段把调试策略带上
+- 不要猜 action / control 参数名；先用 `action_get()` / `control_get()` 看声明
 - 不要一开始就写页面脚本；先看 `session_page_snapshot()` 返回的 HTML / 截图
 - 不要直接猜 workflow 文件路径；优先用 `workflow_list()` 返回的逻辑名
 """.strip()
@@ -100,18 +108,27 @@ Weboter MCP 工具选择指南。
 - `workflow_submit_upload`
 - `workflow_delete_managed`（仅 admin）
 
-3. 想跟踪任务结果
+3. 想确认环境里有哪些 action / control 以及参数约定
+- `action_list`
+- `action_get`
+- `control_list`
+- `control_get`
+
+4. 想跟踪任务结果
 - `task_list`
 - `task_get`
 - `task_logs`
 
-4. 想观察会话当前状态
+5. 想观察会话当前状态
 - `session_list`
 - `session_get`
 - `session_snapshots`
 - `session_workflow`
+- `session_snapshot_detail`
+- `session_workflow_node_detail`
+- `session_runtime_value`
 
-5. 想让执行停住或继续
+6. 想让执行停住或继续
 - `workflow_submit_*` + `pause_before_start`
 - `workflow_submit_*` + `breakpoints`
 - `session_interrupt`
@@ -119,14 +136,14 @@ Weboter MCP 工具选择指南。
 - `session_resume`
 - `session_abort`
 
-6. 想修改执行中的 workflow
+7. 想修改执行中的 workflow
 - `session_set_context`
 - `session_patch_node`
 - `session_add_node`
 - `session_jump_node`
 - `session_export_workflow`
 
-7. 想调试页面
+8. 想调试页面
 - `session_page_snapshot`
 - `session_page_run_script`
 
@@ -155,6 +172,10 @@ def _profile_tools(profile: str) -> set[str]:
         "readonly": {
             "service_status",
             "service_logs",
+            "action_list",
+            "action_get",
+            "control_list",
+            "control_get",
             "workflow_list",
             "task_list",
             "task_get",
@@ -162,10 +183,17 @@ def _profile_tools(profile: str) -> set[str]:
             "session_list",
             "session_get",
             "session_snapshots",
+            "session_snapshot_detail",
+            "session_workflow_node_detail",
+            "session_runtime_value",
         },
         "operator": {
             "service_status",
             "service_logs",
+            "action_list",
+            "action_get",
+            "control_list",
+            "control_get",
             "workflow_list",
             "workflow_submit_upload",
             "workflow_submit_managed",
@@ -175,6 +203,7 @@ def _profile_tools(profile: str) -> set[str]:
             "session_list",
             "session_get",
             "session_snapshots",
+            "session_snapshot_detail",
             "session_pause",
             "session_interrupt",
             "session_resume",
@@ -184,6 +213,8 @@ def _profile_tools(profile: str) -> set[str]:
             "session_patch_node",
             "session_add_node",
             "session_workflow",
+            "session_workflow_node_detail",
+            "session_runtime_value",
             "session_update_breakpoints",
             "session_clear_breakpoints",
             "session_export_workflow",
@@ -193,6 +224,10 @@ def _profile_tools(profile: str) -> set[str]:
         "admin": {
             "service_status",
             "service_logs",
+            "action_list",
+            "action_get",
+            "control_list",
+            "control_get",
             "workflow_list",
             "workflow_submit_upload",
             "workflow_submit_managed",
@@ -203,6 +238,7 @@ def _profile_tools(profile: str) -> set[str]:
             "session_list",
             "session_get",
             "session_snapshots",
+            "session_snapshot_detail",
             "session_pause",
             "session_interrupt",
             "session_resume",
@@ -212,6 +248,8 @@ def _profile_tools(profile: str) -> set[str]:
             "session_patch_node",
             "session_add_node",
             "session_workflow",
+            "session_workflow_node_detail",
+            "session_runtime_value",
             "session_update_breakpoints",
             "session_clear_breakpoints",
             "session_export_workflow",
@@ -247,6 +285,28 @@ def create_mcp_server() -> FastMCP:
         state = client.service_state()
         return f"{state['workspace_root'].rstrip('/')}" + "/.weboter/workflows"
 
+    def clamp_limit(value: int, default: int, maximum: int) -> int:
+        if value <= 0:
+            return default
+        return min(value, maximum)
+
+    def clamp_lines(value: int, default: int = 50, maximum: int = 120) -> int:
+        if value <= 0:
+            return default
+        return min(value, maximum)
+
+    def summarize_named_items(result: dict[str, Any], limit: int) -> dict[str, Any]:
+        items = result.get("items") or []
+        if not isinstance(items, list):
+            return result
+        limited = items[:limit]
+        return {
+            "items": limited,
+            "total_count": len(items),
+            "returned_count": len(limited),
+            "remaining_count": max(len(items) - len(limited), 0),
+        }
+
     if "service_status" in enabled_tools:
         @server.tool()
         def service_status() -> dict[str, Any]:
@@ -260,16 +320,40 @@ def create_mcp_server() -> FastMCP:
 
     if "service_logs" in enabled_tools:
         @server.tool()
-        def service_logs(lines: int = 200) -> dict[str, Any]:
+        def service_logs(lines: int = 50) -> dict[str, Any]:
             """读取 Weboter service 系统日志。"""
-            return client.service_logs(lines)
+            return client.service_logs(clamp_lines(lines))
+
+    if "action_list" in enabled_tools:
+        @server.tool()
+        def action_list(limit: int = 50) -> dict[str, Any]:
+            """列出当前环境已注册 action 的摘要。需要参数约定时，继续调用 action_get。"""
+            return summarize_named_items(client.list_actions(), clamp_limit(limit, 50, 100))
+
+    if "action_get" in enabled_tools:
+        @server.tool()
+        def action_get(full_name: str) -> dict[str, Any]:
+            """读取单个 action 的完整契约，包括 description、inputs 和 outputs。"""
+            return client.get_action(full_name)
+
+    if "control_list" in enabled_tools:
+        @server.tool()
+        def control_list(limit: int = 50) -> dict[str, Any]:
+            """列出当前环境已注册 control 的摘要。需要参数约定时，继续调用 control_get。"""
+            return summarize_named_items(client.list_controls(), clamp_limit(limit, 50, 100))
+
+    if "control_get" in enabled_tools:
+        @server.tool()
+        def control_get(full_name: str) -> dict[str, Any]:
+            """读取单个 control 的完整契约，包括 description、inputs 和 outputs。"""
+            return client.get_control(full_name)
 
     if "workflow_list" in enabled_tools:
         @server.tool()
-        def workflow_list(directory: str | None = None) -> dict[str, Any]:
+        def workflow_list(directory: str | None = None, limit: int = 50) -> dict[str, Any]:
             """列出 workflow。未传 directory 时列出 service 管理目录中的 workflow。"""
             target_directory = directory or managed_workflow_directory()
-            return client.handle_directory(target_directory, list_only=True)
+            return summarize_named_items(client.handle_directory(target_directory, list_only=True), clamp_limit(limit, 50, 100))
 
     if "workflow_submit_upload" in enabled_tools:
         @server.tool()
@@ -316,7 +400,7 @@ def create_mcp_server() -> FastMCP:
         @server.tool()
         def task_list(limit: int = 20) -> dict[str, Any]:
             """列出最近任务。"""
-            return client.list_tasks(limit)
+            return client.list_tasks(clamp_limit(limit, 20, 50))
 
     if "task_get" in enabled_tools:
         @server.tool()
@@ -326,15 +410,15 @@ def create_mcp_server() -> FastMCP:
 
     if "task_logs" in enabled_tools:
         @server.tool()
-        def task_logs(task_id: str, lines: int = 200) -> dict[str, Any]:
+        def task_logs(task_id: str, lines: int = 50) -> dict[str, Any]:
             """读取任务日志，支持唯一前缀。"""
-            return client.get_task_logs(task_id, lines)
+            return client.get_task_logs(task_id, clamp_lines(lines))
 
     if "session_list" in enabled_tools:
         @server.tool()
         def session_list(limit: int = 20) -> dict[str, Any]:
             """列出最近执行会话。"""
-            return client.list_sessions(limit)
+            return client.list_sessions(clamp_limit(limit, 20, 50))
 
     if "session_get" in enabled_tools:
         @server.tool()
@@ -345,8 +429,18 @@ def create_mcp_server() -> FastMCP:
     if "session_snapshots" in enabled_tools:
         @server.tool()
         def session_snapshots(session_id: str, limit: int = 20) -> dict[str, Any]:
-            """读取执行会话快照。"""
+            """读取执行会话快照摘要。返回每个快照可进一步获取的 sections，而不是一次性返回全部内容。"""
             return client.get_session_snapshots(session_id, limit)
+
+    if "session_snapshot_detail" in enabled_tools:
+        @server.tool()
+        def session_snapshot_detail(
+            session_id: str,
+            snapshot_index: int,
+            sections: list[str] | None = None,
+        ) -> dict[str, Any]:
+            """按 snapshot index 和 sections 读取快照详情，例如 runtime、workflow、page、debug。"""
+            return client.get_session_snapshot_detail(session_id, snapshot_index, sections)
 
     if "session_pause" in enabled_tools:
         @server.tool()
@@ -399,8 +493,20 @@ def create_mcp_server() -> FastMCP:
     if "session_workflow" in enabled_tools:
         @server.tool()
         def session_workflow(session_id: str) -> dict[str, Any]:
-            """读取当前执行会话中的 workflow 定义，便于分析和动态修改。"""
+            """读取当前执行会话中的 workflow 摘要。需要完整节点定义时，继续调用 session_workflow_node_detail。"""
             return client.get_session_workflow(session_id)
+
+    if "session_workflow_node_detail" in enabled_tools:
+        @server.tool()
+        def session_workflow_node_detail(session_id: str, node_id: str) -> dict[str, Any]:
+            """按 node_id 读取 workflow 中某个节点的完整定义。"""
+            return client.get_session_workflow_node(session_id, node_id)
+
+    if "session_runtime_value" in enabled_tools:
+        @server.tool()
+        def session_runtime_value(session_id: str, key: str) -> dict[str, Any]:
+            """按 key 读取当前运行时中的单个值，并返回受限预览。"""
+            return client.get_session_runtime_value(session_id, key)
 
     if "session_update_breakpoints" in enabled_tools:
         @server.tool()

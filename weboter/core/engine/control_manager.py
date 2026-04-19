@@ -1,3 +1,5 @@
+from dataclasses import asdict
+
 from weboter.public.contracts.control import ControlBase
 
 class ControlPackage:
@@ -89,6 +91,38 @@ class ControlManager:
         if not package:
             return None
         return package.get_control(control_name)
+
+    def list_controls(self) -> list[dict]:
+        items: list[dict] = []
+        for package_name, package in sorted(self._packages.items()):
+            for control_name, control in sorted(package.controls.items()):
+                items.append(self._describe_control(package_name, control_name, control))
+        return items
+
+    def describe_control(self, full_name: str) -> dict | None:
+        if '.' not in full_name:
+            return None
+        package_name, control_name = full_name.split('.', 1)
+        package = self._packages.get(package_name)
+        if package is None:
+            return None
+        control = package.get_control(control_name)
+        if control is None:
+            return None
+        return self._describe_control(package_name, control_name, control)
+
+    def _describe_control(self, package_name: str, control_name: str, control: ControlBase) -> dict:
+        outputs = getattr(control, "outputs", None)
+        serialized_outputs = [asdict(outputs)] if outputs is not None else []
+        return {
+            "kind": "control",
+            "package": package_name,
+            "name": control_name,
+            "full_name": f"{package_name}.{control_name}",
+            "description": getattr(control, "description", "") or "",
+            "inputs": [asdict(item) for item in getattr(control, "inputs", [])],
+            "outputs": serialized_outputs,
+        }
     
 
 control_manager = ControlManager()

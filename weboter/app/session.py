@@ -150,11 +150,38 @@ class ExecutionSession:
         executor = self._active_executor
         if executor is None or executor.workflow is None:
             raise ValueError(f"Session workflow is not available: {self.record.session_id}")
+        workflow = executor.workflow
+        workflow_summary = self._serialize_flow_summary(workflow)
         return {
             "session_id": self.record.session_id,
             "task_id": self.record.task_id,
             "current_node_id": executor.runtime.current_node_id,
-            "workflow": self._serialize_flow(executor.workflow),
+            "workflow": workflow_summary,
+        }
+
+    def describe_workflow_node(self, node_id: str) -> dict[str, Any]:
+        executor = self._active_executor
+        if executor is None or executor.workflow is None:
+            raise ValueError(f"Session workflow is not available: {self.record.session_id}")
+        for node in executor.workflow.nodes:
+            if node.node_id == node_id:
+                return {
+                    "session_id": self.record.session_id,
+                    "task_id": self.record.task_id,
+                    "node": self._serialize_node(node),
+                }
+        raise FileNotFoundError(f"Workflow node not found: {node_id}")
+
+    def describe_runtime_value(self, key: str) -> dict[str, Any]:
+        executor = self._active_executor
+        if executor is None:
+            raise ValueError(f"Session runtime is not available: {self.record.session_id}")
+        value = executor.runtime.get_value(key)
+        return {
+            "session_id": self.record.session_id,
+            "task_id": self.record.task_id,
+            "key": key,
+            "value": self._serialize_runtime_preview(value),
         }
 
     def dispatch_command(
@@ -447,8 +474,8 @@ class ExecutionSession:
         script_locals: dict[str, Any] = {}
         exec(compiled, script_globals, script_locals)
         runner = script_locals["__weboter_page_script__"]
-        runtime_snapshot = self._serialize_runtime(executor.runtime.data_context.data)
-        workflow_snapshot = self._serialize_flow(executor.workflow)
+        runtime_snapshot = self._serialize_runtime_preview(executor.runtime.data_context.data)
+        workflow_snapshot = self._serialize_flow_summary(executor.workflow)
         context = {
             "session_id": self.record.session_id,
             "task_id": self.record.task_id,
@@ -461,7 +488,7 @@ class ExecutionSession:
         page_info = await self._collect_page_info(executor, detail=True)
         snapshot = await self.capture_snapshot(executor, phase="page_script")
         return {
-            "result": self._serialize_runtime(result),
+            "result": self._serialize_runtime_preview(result),
             "page": page_info,
             "snapshot": {
                 "index": snapshot["index"],
@@ -577,6 +604,64 @@ class ExecutionSession:
         return {"type": type(data).__name__, "repr": repr(data)}
 
     @staticmethod
+    def _serialize_runtime_preview(data: Any, depth: int = 0) -> Any:
+        if depth >= 2:
+            if isinstance(data, dict):
+                return {
+                    "type": "dict",
+                    "key_count": len(data),
+                    "keys": sorted(str(key) for key in list(data.keys())[:20]),
+                }
+            if isinstance(data, (list, tuple)):
+                return {
+                    "type": type(data).__name__,
+                    "item_count": len(data),
+                }
+            if isinstance(data, str):
+                return ExecutionSession._truncate_string(data, 300)
+            return ExecutionSession._serialize_runtime(data)
+
+        if isinstance(data, dict):
+            keys = list(data.keys())
+            items = {}
+            for key in keys[:20]:
+                items[str(key)] = ExecutionSession._serialize_runtime_preview(data[key], depth + 1)
+            return {
+                "type": "dict",
+                "key_count": len(data),
+                "items": items,
+                "truncated": len(keys) > 20,
+            }
+        if isinstance(data, list):
+            return {
+                "type": "list",
+                "item_count": len(data),
+                "items": [ExecutionSession._serialize_runtime_preview(item, depth + 1) for item in data[:20]],
+                "truncated": len(data) > 20,
+            }
+        if isinstance(data, tuple):
+            return {
+                "type": "tuple",
+                "item_count": len(data),
+                "items": [ExecutionSession._serialize_runtime_preview(item, depth + 1) for item in list(data)[:20]],
+                "truncated": len(data) > 20,
+            }
+        if isinstance(data, str):
+            return ExecutionSession._truncate_string(data, 500)
+        return ExecutionSession._serialize_runtime(data)
+
+    @staticmethod
+    def _truncate_string(value: str, limit: int) -> dict[str, Any] | str:
+        if len(value) <= limit:
+            return value
+        return {
+            "type": "string",
+            "length": len(value),
+            "preview": value[:limit],
+            "truncated": True,
+        }
+
+    @staticmethod
     def _serialize_node(node: Node | None) -> dict[str, Any] | None:
         if node is None:
             return None
@@ -593,6 +678,16 @@ class ExecutionSession:
         }
 
     @staticmethod
+    def _serialize_node_summary(node: Node) -> dict[str, Any]:
+        return {
+            "node_id": node.node_id,
+            "name": node.name,
+            "action": node.action,
+            "control": node.control,
+            "log": node.log,
+        }
+
+    @staticmethod
     def _serialize_flow(flow: Flow | None) -> dict[str, Any] | None:
         if flow is None:
             return None
@@ -603,6 +698,25 @@ class ExecutionSession:
             "start_node_id": flow.start_node_id,
             "log": flow.log,
             "nodes": [ExecutionSession._serialize_node(item) for item in flow.nodes],
+        }
+
+    @staticmethod
+    def _serialize_flow_summary(flow: Flow | None) -> dict[str, Any] | None:
+        if flow is None:
+            return None
+        node_summaries = [ExecutionSession._serialize_node_summary(item) for item in flow.nodes[:20]]
+        return {
+            "flow_id": flow.flow_id,
+            "name": flow.name,
+            "description": flow.description,
+            "start_node_id": flow.start_node_id,
+            "log": flow.log,
+            "node_count": len(flow.nodes),
+            "nodes": node_summaries,
+            "remaining_node_count": max(len(flow.nodes) - len(node_summaries), 0),
+            "available_detail_methods": [
+                "session_workflow_node_detail(node_id)",
+            ],
         }
 
     @staticmethod
@@ -723,7 +837,18 @@ class ExecutionSessionManager:
     def get_snapshots(self, session_id: str, limit: int = 20) -> list[dict[str, Any]]:
         session = self.get_session(session_id)
         snapshot_files = sorted(self.snapshot_root(session.session_id).glob("*.json"), reverse=True)
-        return [json.loads(path.read_text(encoding="utf-8")) for path in snapshot_files[:limit]]
+        return [self._snapshot_summary(json.loads(path.read_text(encoding="utf-8"))) for path in snapshot_files[:limit]]
+
+    def get_snapshot_detail(
+        self,
+        session_id: str,
+        snapshot_index: int,
+        sections: list[str] | None = None,
+    ) -> dict[str, Any]:
+        session = self.get_session(session_id)
+        path = self._resolve_snapshot_file(session.session_id, snapshot_index)
+        snapshot = json.loads(path.read_text(encoding="utf-8"))
+        return self._snapshot_detail(snapshot, sections)
 
     def request_pause(self, session_id: str, reason: str = "manual") -> dict[str, Any]:
         session = self._require_live_session(session_id)
@@ -764,6 +889,14 @@ class ExecutionSessionManager:
     def get_workflow(self, session_id: str) -> dict[str, Any]:
         session = self._require_live_session(session_id)
         return session.describe_workflow()
+
+    def get_workflow_node(self, session_id: str, node_id: str) -> dict[str, Any]:
+        session = self._require_live_session(session_id)
+        return session.describe_workflow_node(node_id)
+
+    def get_runtime_value(self, session_id: str, key: str) -> dict[str, Any]:
+        session = self._require_live_session(session_id)
+        return session.describe_runtime_value(key)
 
     def configure_breakpoints(
         self,
@@ -823,6 +956,116 @@ class ExecutionSessionManager:
 
     def snapshot_root(self, session_id: str) -> Path:
         return self.session_root(session_id) / "snapshots"
+
+    def _resolve_snapshot_file(self, session_id: str, snapshot_index: int) -> Path:
+        matches = sorted(self.snapshot_root(session_id).glob(f"{snapshot_index:05d}_*.json"))
+        if not matches:
+            raise FileNotFoundError(f"Snapshot not found: session={session_id} index={snapshot_index}")
+        return matches[0]
+
+    @staticmethod
+    def _snapshot_sections(snapshot: dict[str, Any]) -> list[str]:
+        sections: list[str] = []
+        if snapshot.get("node") is not None:
+            sections.append("node")
+        if snapshot.get("runtime") is not None:
+            sections.append("runtime")
+        if snapshot.get("workflow") is not None:
+            sections.append("workflow")
+        if snapshot.get("page") is not None:
+            sections.append("page")
+        if snapshot.get("debug") is not None:
+            sections.append("debug")
+        if snapshot.get("error") is not None:
+            sections.append("error")
+        return sections
+
+    @classmethod
+    def _snapshot_summary(cls, snapshot: dict[str, Any]) -> dict[str, Any]:
+        page = snapshot.get("page") or {}
+        workflow = snapshot.get("workflow") or {}
+        runtime = snapshot.get("runtime") or {}
+        node = snapshot.get("node") or {}
+        return {
+            "session_id": snapshot.get("session_id"),
+            "task_id": snapshot.get("task_id"),
+            "index": snapshot.get("index"),
+            "timestamp": snapshot.get("timestamp"),
+            "phase": snapshot.get("phase"),
+            "current_node_id": snapshot.get("current_node_id"),
+            "current_node_name": snapshot.get("current_node_name"),
+            "next_node_id": snapshot.get("next_node_id"),
+            "error": snapshot.get("error"),
+            "node_summary": {
+                "node_id": node.get("node_id"),
+                "name": node.get("name"),
+                "action": node.get("action"),
+                "control": node.get("control"),
+            } if node else None,
+            "page_summary": {
+                "url": page.get("url"),
+                "title": page.get("title"),
+            } if page else None,
+            "runtime_summary": {
+                "top_level_keys": sorted(runtime.keys()) if isinstance(runtime, dict) else None,
+            },
+            "workflow_summary": {
+                "flow_id": workflow.get("flow_id"),
+                "name": workflow.get("name"),
+                "start_node_id": workflow.get("start_node_id"),
+                "node_count": len(workflow.get("nodes") or []),
+            } if workflow else None,
+            "debug_summary": {
+                "last_stop": (snapshot.get("debug") or {}).get("last_stop"),
+                "interrupt_requested": (snapshot.get("debug") or {}).get("interrupt_requested"),
+                "breakpoint_count": len((snapshot.get("debug") or {}).get("breakpoints") or []),
+            } if snapshot.get("debug") is not None else None,
+            "available_sections": cls._snapshot_sections(snapshot),
+        }
+
+    @classmethod
+    def _snapshot_detail(cls, snapshot: dict[str, Any], sections: list[str] | None = None) -> dict[str, Any]:
+        detail = cls._snapshot_summary(snapshot)
+        requested = cls._normalize_snapshot_sections(sections)
+        if not requested:
+            return detail
+        workflow = snapshot.get("workflow") or {}
+        runtime = snapshot.get("runtime")
+        section_map = {
+            "node": snapshot.get("node"),
+            "runtime": ExecutionSession._serialize_runtime_preview(runtime),
+            "workflow": {
+                "flow_id": workflow.get("flow_id"),
+                "name": workflow.get("name"),
+                "start_node_id": workflow.get("start_node_id"),
+                "node_count": len(workflow.get("nodes") or []),
+                "available_detail_methods": [
+                    "session_workflow_node_detail(node_id)",
+                    "session_runtime_value(key)",
+                ],
+            } if workflow else None,
+            "page": snapshot.get("page"),
+            "debug": snapshot.get("debug"),
+            "error": snapshot.get("error"),
+        }
+        detail["sections"] = {name: section_map[name] for name in requested if name in section_map}
+        return detail
+
+    @staticmethod
+    def _normalize_snapshot_sections(sections: list[str] | None) -> list[str]:
+        if not sections:
+            return []
+        allowed = {"node", "runtime", "workflow", "page", "debug", "error"}
+        normalized: list[str] = []
+        for item in sections:
+            name = item.strip().lower()
+            if not name:
+                continue
+            if name not in allowed:
+                raise ValueError(f"Unsupported snapshot section: {item}")
+            if name not in normalized:
+                normalized.append(name)
+        return normalized
 
     def _require_live_session(self, session_id: str) -> ExecutionSession:
         session = self.get_live_session(session_id)

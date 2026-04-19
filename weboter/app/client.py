@@ -109,6 +109,18 @@ class WorkflowServiceClient:
     def service_state(self) -> dict[str, Any]:
         return self._request("GET", "/service/state")
 
+    def list_actions(self) -> dict[str, Any]:
+        return self._request("GET", "/catalog/actions")
+
+    def get_action(self, full_name: str) -> dict[str, Any]:
+        return self._request("GET", f"/catalog/actions/{urllib.parse.quote(full_name, safe='')}")
+
+    def list_controls(self) -> dict[str, Any]:
+        return self._request("GET", "/catalog/controls")
+
+    def get_control(self, full_name: str) -> dict[str, Any]:
+        return self._request("GET", f"/catalog/controls/{urllib.parse.quote(full_name, safe='')}")
+
     def upload_workflow(
         self,
         source: Path,
@@ -173,6 +185,17 @@ class WorkflowServiceClient:
         query = urllib.parse.urlencode({"limit": limit})
         return self._request("GET", f"/sessions/{session_id}/snapshots?{query}")
 
+    def get_session_snapshot_detail(
+        self,
+        session_id: str,
+        snapshot_index: int,
+        sections: list[str] | None = None,
+    ) -> dict[str, Any]:
+        query = ""
+        if sections:
+            query = "?" + urllib.parse.urlencode({"sections": ",".join(sections)})
+        return self._request("GET", f"/sessions/{session_id}/snapshots/{snapshot_index}{query}")
+
     def pause_session(self, session_id: str) -> dict[str, Any]:
         return self._request("POST", f"/sessions/{session_id}/pause", {})
 
@@ -199,6 +222,13 @@ class WorkflowServiceClient:
 
     def get_session_workflow(self, session_id: str) -> dict[str, Any]:
         return self._request("GET", f"/sessions/{session_id}/workflow")
+
+    def get_session_workflow_node(self, session_id: str, node_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/sessions/{session_id}/workflow/node/{urllib.parse.quote(node_id, safe='')}")
+
+    def get_session_runtime_value(self, session_id: str, key: str) -> dict[str, Any]:
+        query = urllib.parse.urlencode({"key": key})
+        return self._request("GET", f"/sessions/{session_id}/runtime?{query}")
 
     def configure_session_breakpoints(
         self,

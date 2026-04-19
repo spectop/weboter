@@ -59,6 +59,10 @@ class SessionSetContextRequest(BaseModel):
     value: Any
 
 
+class SessionRuntimeValueRequest(BaseModel):
+    key: str
+
+
 class SessionJumpRequest(BaseModel):
     node_id: str
 
@@ -74,6 +78,10 @@ class SessionConfigureBreakpointsRequest(BaseModel):
 
 class SessionClearBreakpointsRequest(BaseModel):
     breakpoint_ids: list[str] | None = None
+
+
+class SessionSnapshotDetailSectionsRequest(BaseModel):
+    sections: List[str] = Field(default_factory=list)
 
 
 class SessionPatchNodeRequest(BaseModel):
@@ -141,7 +149,7 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     api_token = service.get_api_token() or ""
     app = FastAPI(
         title="Weboter Local Service",
-        version="0.1.5",
+        version="0.1.9",
         summary="Weboter 本地 workflow 执行服务",
     )
     app.state.workflow_service = service
@@ -236,6 +244,28 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
             "content": _tail_file(service.service_log_path, lines),
         }
 
+    @app.get("/catalog/actions", tags=["catalog"])
+    def list_actions() -> dict[str, Any]:
+        return service.list_actions()
+
+    @app.get("/catalog/actions/{full_name:path}", tags=["catalog"])
+    def get_action(full_name: str) -> dict[str, Any]:
+        item = service.get_action(full_name)
+        if item is None:
+            raise HTTPException(status_code=404, detail=f"action not found: {full_name}")
+        return item
+
+    @app.get("/catalog/controls", tags=["catalog"])
+    def list_controls() -> dict[str, Any]:
+        return service.list_controls()
+
+    @app.get("/catalog/controls/{full_name:path}", tags=["catalog"])
+    def get_control(full_name: str) -> dict[str, Any]:
+        item = service.get_control(full_name)
+        if item is None:
+            raise HTTPException(status_code=404, detail=f"control not found: {full_name}")
+        return item
+
     @app.get("/tasks", tags=["task"])
     def list_tasks(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
         return {"items": [asdict(task) for task in task_manager.list_tasks(limit)]}
@@ -269,6 +299,20 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     def get_session_snapshots(session_id: str, limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
         try:
             return {"items": session_manager.get_snapshots(session_id, limit)}
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.get("/sessions/{session_id}/snapshots/{snapshot_index}", tags=["session"])
+    def get_session_snapshot_detail(
+        session_id: str,
+        snapshot_index: int,
+        sections: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        try:
+            requested_sections = []
+            if sections:
+                requested_sections = [item for item in sections.split(",") if item.strip()]
+            return session_manager.get_snapshot_detail(session_id, snapshot_index, requested_sections)
         except Exception as exc:
             _raise_http_error(exc)
 
@@ -332,6 +376,20 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     def session_workflow(session_id: str) -> dict[str, Any]:
         try:
             return session_manager.get_workflow(session_id)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.get("/sessions/{session_id}/workflow/node/{node_id}", tags=["session"])
+    def session_workflow_node(session_id: str, node_id: str) -> dict[str, Any]:
+        try:
+            return session_manager.get_workflow_node(session_id, node_id)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.get("/sessions/{session_id}/runtime", tags=["session"])
+    def session_runtime_value(session_id: str, key: str = Query(...)) -> dict[str, Any]:
+        try:
+            return session_manager.get_runtime_value(session_id, key)
         except Exception as exc:
             _raise_http_error(exc)
 
