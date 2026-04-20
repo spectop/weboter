@@ -1,9 +1,27 @@
 from . import basic_action
 from . import basic_control
+from weboter.public.contracts import ActionBase, IOPipe
 
 package_name = "builtin"
 
 captcha_actions = []
+
+
+def _build_missing_dependency_action(name: str, missing_dependency: str) -> type[ActionBase]:
+    class _MissingDependencyAction(ActionBase):
+        description = f"Action '{name}' requires optional dependency '{missing_dependency}'."
+        inputs = []
+        outputs = []
+
+        async def execute(self, io: IOPipe):
+            raise RuntimeError(
+                f"Action '{name}' requires optional dependency '{missing_dependency}'. "
+                "Please install the captcha extras before executing it."
+            )
+
+    _MissingDependencyAction.name = name
+    _MissingDependencyAction.__name__ = name
+    return _MissingDependencyAction
 
 try:
     from . import captcha_action
@@ -15,7 +33,10 @@ try:
 except ModuleNotFoundError as exc:
     if exc.name not in {"cv2", "numpy"}:
         raise
-    captcha_actions = []
+    captcha_actions = [
+        _build_missing_dependency_action("SimpleSlideCaptcha", exc.name),
+        _build_missing_dependency_action("SimpleSlideNCC", exc.name),
+    ]
 
 actions = [
     # special

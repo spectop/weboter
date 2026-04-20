@@ -154,6 +154,8 @@ weboter session snapshot-detail <session_id> --snapshot-index 0 --sections runti
 weboter session workflow <session_id>
 weboter session workflow-node-detail <session_id> --node-id login
 weboter session runtime-value <session_id> --key '$flow{form}'
+weboter session run-node <session_id> --node @temp-node.json
+weboter session run-node <session_id> --node @temp-node.json --jump-target marker
 weboter session update-breakpoints <session_id> --breakpoints '[{"phase":"before_step","node_id":"login"}]'
 weboter session interrupt <session_id>
 weboter session resume <session_id>
@@ -165,6 +167,14 @@ weboter session page-run-script <session_id> --code @script.py --arg '{"mode":"d
 
 - 直接传 JSON 字符串
 - 传 `@文件路径`，由 CLI 读取文件内容后再解析
+
+`session run-node` 适合 agent 在当前 session 的页面、变量和登录态之上反复尝试一个临时 action 节点，而不必每次都修改 workflow 再重新执行。
+
+默认情况下，临时节点执行后会回到原来的 `current_node_id`，因此不会污染主流程推进位置；如果传 `--jump-target <node_id>`，则会在临时节点执行后直接跳到指定节点，适合把试出来的动作接到一个预留的标记节点上继续跑。
+
+`session page-snapshot`、`session page-run-script`、`page/goto`、`page/click`、`page/fill` 现在默认不会因为命令下发而强制把 session 停在 `command:*` 状态；同时 service 侧会给页面调试命令更长的等待窗口，减少“service 实际执行完成但调用方先超时”的状态分裂。
+
+对于 `SleepFor` 这类长动作节点，页面调试命令和 `abort` 也会优先直接投递到当前 session 所在的运行事件循环，而不是必须等主流程走到下一个 step 边界才处理。这样 agent 可以在 `Hold After Login` 之类的保活节点期间继续观察当前页面状态，避免把“命令排队未执行”误判成“页面还停在旧状态”。
 
 ## 本地模式
 
@@ -204,6 +214,7 @@ service 默认暴露以下接口：
 - `GET /sessions` / `GET /sessions/{session_id}` / `GET /sessions/{session_id}/snapshots`：执行会话观察
 - `POST /sessions/{session_id}/pause|interrupt|resume|abort`：执行会话控制，其中 `interrupt` 会在下一个节点执行前停住
 - `POST /sessions/{session_id}/context|jump|patch-node|add-node`：运行中介入 workflow
+- `POST /sessions/{session_id}/run-node`：在当前运行时里执行一个临时节点，默认不改变主流程节点位置
 - `GET /sessions/{session_id}/workflow`：读取当前执行中的 workflow 定义
 - `POST /sessions/{session_id}/breakpoints` / `POST /sessions/{session_id}/breakpoints/clear`：配置或清理断点
 - `GET /sessions/{session_id}/page`、`POST /sessions/{session_id}/page/script` 及其他 `page/*` 接口：页面级调试与操作
@@ -215,6 +226,7 @@ service 默认暴露以下接口：
 
 - `env`：把账号、密码、token 等隐私数据写入 service 内部受管环境变量，再在 workflow 中通过 `$env{group.key}` 引用
 - `catalog/actions` / `catalog/controls`：先确认环境里可用的 action / control，再按单项读取参数契约
+- `catalog/actions` 会保留可选依赖动作的能力位；例如缺少验证码依赖时，`builtin.SimpleSlideNCC` 仍会出现在 catalog 中，但执行时会明确提示需要安装 captcha extras
 - `pause_before_start`：在提交 workflow 时直接要求第一个节点前停住，适合首轮调试
 - `interrupt`：请求在下一个节点执行前停住，适合会话已经启动后的追加介入
 - `breakpoints`：按 `before_step + node_id` 或 `node_name` 配置精确断点

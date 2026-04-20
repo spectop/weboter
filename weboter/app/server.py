@@ -218,6 +218,11 @@ class SessionAddNodeRequest(BaseModel):
     node: dict[str, Any]
 
 
+class SessionRunNodeRequest(BaseModel):
+    node: dict[str, Any]
+    jump_to_node_id: str | None = None
+
+
 class SessionExportWorkflowRequest(BaseModel):
     path: str
 
@@ -284,7 +289,7 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     api_token = service.get_api_token() or ""
     app = FastAPI(
         title="Weboter Local Service",
-        version="0.1.13",
+        version="0.1.16",
         summary="Weboter 本地 workflow 执行服务",
     )
     app.state.workflow_service = service
@@ -560,6 +565,13 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     def session_add_node(session_id: str, payload: SessionAddNodeRequest) -> dict[str, Any]:
         try:
             return session_manager.add_node(session_id, payload.node)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/{session_id}/run-node", tags=["session"])
+    def session_run_node(session_id: str, payload: SessionRunNodeRequest) -> dict[str, Any]:
+        try:
+            return session_manager.run_temporary_node(session_id, payload.node, jump_to_node_id=payload.jump_to_node_id)
         except Exception as exc:
             _raise_http_error(exc)
 

@@ -48,3 +48,10 @@ class ContractCatalogTests(unittest.TestCase):
         self.assertEqual(control["full_name"], "builtin.NextNode")
         self.assertIn("inputs", control)
         self.assertIn("outputs", control)
+
+    def test_captcha_actions_are_visible_in_catalog(self):
+        result = self.service.list_actions()
+
+        full_names = {item["full_name"] for item in result["items"]}
+        self.assertIn("builtin.SimpleSlideCaptcha", full_names)
+        self.assertIn("builtin.SimpleSlideNCC", full_names)

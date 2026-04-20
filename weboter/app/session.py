@@ -97,6 +97,7 @@ class ExecutionSession:
         self._interrupt_requested = False
         self._breakpoints: list[dict[str, Any]] = []
         self._active_executor = None
+        self._runtime_loop: asyncio.AbstractEventLoop | None = None
 
     def create_hooks(self) -> SessionHooks:
         return SessionHooks(self)
@@ -193,6 +194,8 @@ class ExecutionSession:
     ) -> Any:
         if auto_pause and action not in {"resume", "abort"}:
             self.request_pause(f"command:{action}")
+        if self._can_dispatch_immediately(action):
+            return self._dispatch_command_immediately(action, payload, timeout)
         command = _SessionCommand(action, payload)
         self._commands.put(command)
         if not command.event.wait(timeout):
@@ -201,8 +204,34 @@ class ExecutionSession:
             raise command.error
         return command.result
 
+    def _can_dispatch_immediately(self, action: str) -> bool:
+        if action not in {
+            "abort",
+            "page_snapshot",
+            "page_evaluate",
+            "page_run_script",
+            "page_goto",
+            "page_click",
+            "page_fill",
+        }:
+            return False
+        return self._runtime_loop is not None and self._runtime_loop.is_running() and self._active_executor is not None
+
+    def _dispatch_command_immediately(self, action: str, payload: dict[str, Any] | None, timeout: float) -> Any:
+        if self._runtime_loop is None or self._active_executor is None:
+            raise TimeoutError(f"Session command timeout: {action}")
+        future = asyncio.run_coroutine_threadsafe(
+            self._apply_command(action, payload or {}, self._active_executor),
+            self._runtime_loop,
+        )
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError as exc:
+            raise TimeoutError(f"Session command timeout: {action}") from exc
+
     async def on_workflow_loaded(self, executor, flow: Flow) -> None:
         self._active_executor = executor
+        self._runtime_loop = asyncio.get_running_loop()
         with self._lock:
             self.record.status = SESSION_STATUS_RUNNING
             self.record.workflow_name = flow.name
@@ -212,17 +241,20 @@ class ExecutionSession:
 
     async def before_step(self, executor, node: Node) -> None:
         self._active_executor = executor
+        self._runtime_loop = asyncio.get_running_loop()
         await self.capture_snapshot(executor, phase="before_step", node=node)
         await self._arm_debug_stop(executor, phase="before_step", node=node)
         await self._wait_for_commands(executor)
 
     async def after_step(self, executor, node: Node, next_node_id: str) -> None:
         self._active_executor = executor
+        self._runtime_loop = asyncio.get_running_loop()
         await self.capture_snapshot(executor, phase="after_step", node=node, next_node_id=next_node_id)
         await self._wait_for_commands(executor)
 
     async def on_error(self, executor, exc: Exception) -> bool:
         self._active_executor = executor
+        self._runtime_loop = asyncio.get_running_loop()
         with self._lock:
             self._guard_waiting = True
             self.record.status = SESSION_STATUS_GUARD_WAITING
@@ -247,6 +279,7 @@ class ExecutionSession:
 
     async def on_finished(self, executor) -> None:
         self._active_executor = executor
+        self._runtime_loop = asyncio.get_running_loop()
         await self.capture_snapshot(executor, phase="finished")
 
     def mark_finished(self, success: bool, error: str | None = None) -> None:
@@ -256,6 +289,7 @@ class ExecutionSession:
             self.record.pause_reason = None
             self.record.updated_at = self.manager._now()
             self.manager._save_record(self.record)
+        self._runtime_loop = None
 
     async def capture_snapshot(
         self,
@@ -427,6 +461,13 @@ class ExecutionSession:
             executor.workflow.nodes.append(node)
             executor.runtime.nodes[node.node_id] = node
             return {"node_id": node.node_id}
+
+        if action == "run_temporary_node":
+            return await self._run_temporary_node(
+                executor,
+                payload["node"],
+                jump_to_node_id=payload.get("jump_to_node_id"),
+            )
 
         if action == "export_workflow":
             output_path = Path(payload["path"]).expanduser().resolve()
@@ -791,9 +832,10 @@ class ExecutionSession:
 
     @staticmethod
     def _build_node(data: dict[str, Any]) -> Node:
+        node_id = data.get("node_id") or f"runtime_{uuid4().hex[:8]}"
         return Node(
-            node_id=data["node_id"],
-            name=data.get("name", data["node_id"]),
+            node_id=node_id,
+            name=data.get("name", node_id),
             description=data.get("description", ""),
             action=data.get("action", ""),
             inputs=data.get("inputs", {}),
@@ -802,6 +844,51 @@ class ExecutionSession:
             params=data.get("params", {}),
             log=data.get("log", "short"),
         )
+
+    async def _run_temporary_node(
+        self,
+        executor,
+        node_data: dict[str, Any],
+        jump_to_node_id: str | None = None,
+    ) -> dict[str, Any]:
+        node = self._build_node(node_data)
+        previous_node_id = executor.runtime.current_node_id
+        original_node = executor.runtime.nodes.get(node.node_id)
+        executor.runtime.nodes[node.node_id] = node
+        executor.runtime.current_node_id = node.node_id
+
+        try:
+            action_io = executor.prepare_action_io(node)
+            if node.action:
+                await executor.exec_action(node.action, action_io)
+                executor.extract_outputs(node, action_io)
+
+            if jump_to_node_id:
+                executor.runtime.set_current_node(jump_to_node_id)
+                executor.runtime.switch_outputs()
+            else:
+                executor.runtime.current_node_id = previous_node_id
+
+            snapshot = await self.capture_snapshot(
+                executor,
+                phase="temporary_node",
+                node=node,
+                next_node_id=jump_to_node_id,
+            )
+            return {
+                "node": self._serialize_node(node),
+                "jumped": bool(jump_to_node_id),
+                "current_node_id": executor.runtime.current_node_id,
+                "outputs": self._serialize_runtime_preview(action_io.outputs),
+                "snapshot_index": snapshot["index"],
+            }
+        finally:
+            if original_node is None:
+                executor.runtime.nodes.pop(node.node_id, None)
+            else:
+                executor.runtime.nodes[node.node_id] = original_node
+            if not jump_to_node_id:
+                executor.runtime.current_node_id = previous_node_id
 
     @staticmethod
     def _patch_node(flow: Flow, runtime, node_id: str, patch: dict[str, Any]) -> Node:
@@ -918,6 +1005,16 @@ class ExecutionSessionManager:
         session = self._require_live_session(session_id)
         return session.dispatch_command("add_node", {"node": node})
 
+    def run_temporary_node(
+        self,
+        session_id: str,
+        node: dict[str, Any],
+        jump_to_node_id: str | None = None,
+    ) -> dict[str, Any]:
+        session = self._require_live_session(session_id)
+        payload = {"node": node, "jump_to_node_id": jump_to_node_id}
+        return session.dispatch_command("run_temporary_node", payload)
+
     def export_workflow(self, session_id: str, path: str) -> dict[str, Any]:
         session = self._require_live_session(session_id)
         return session.dispatch_command("export_workflow", {"path": path})
@@ -949,30 +1046,32 @@ class ExecutionSessionManager:
 
     def page_snapshot(self, session_id: str) -> dict[str, Any]:
         session = self._require_live_session(session_id)
-        return session.dispatch_command("page_snapshot", {})
+        return session.dispatch_command("page_snapshot", {}, timeout=90.0, auto_pause=False)
 
     def page_evaluate(self, session_id: str, script: str, arg: Any = None) -> Any:
         session = self._require_live_session(session_id)
-        return session.dispatch_command("page_evaluate", {"script": script, "arg": arg})
+        return session.dispatch_command("page_evaluate", {"script": script, "arg": arg}, timeout=60.0, auto_pause=False)
 
     def page_run_script(self, session_id: str, code: str, arg: Any = None, timeout_ms: int = 5000) -> dict[str, Any]:
         session = self._require_live_session(session_id)
         return session.dispatch_command(
             "page_run_script",
             {"code": code, "arg": arg, "timeout_ms": timeout_ms},
+            timeout=max(60.0, timeout_ms / 1000 + 15.0),
+            auto_pause=False,
         )
 
     def page_goto(self, session_id: str, url: str) -> dict[str, Any]:
         session = self._require_live_session(session_id)
-        return session.dispatch_command("page_goto", {"url": url})
+        return session.dispatch_command("page_goto", {"url": url}, timeout=60.0, auto_pause=False)
 
     def page_click(self, session_id: str, locator: str, timeout: int = 5000) -> dict[str, Any]:
         session = self._require_live_session(session_id)
-        return session.dispatch_command("page_click", {"locator": locator, "timeout": timeout})
+        return session.dispatch_command("page_click", {"locator": locator, "timeout": timeout}, timeout=60.0, auto_pause=False)
 
     def page_fill(self, session_id: str, locator: str, value: str, timeout: int = 5000) -> dict[str, Any]:
         session = self._require_live_session(session_id)
-        return session.dispatch_command("page_fill", {"locator": locator, "value": value, "timeout": timeout})
+        return session.dispatch_command("page_fill", {"locator": locator, "value": value, "timeout": timeout}, timeout=60.0, auto_pause=False)
 
     def mark_session_finished(self, session_id: str, success: bool, error: str | None = None) -> None:
         session = self._live_sessions.get(session_id)
@@ -1112,8 +1211,11 @@ class ExecutionSessionManager:
     def _save_record(self, record: SessionRecord) -> None:
         record.updated_at = self._now()
         with self._lock:
-            with open(self.root / f"{record.session_id}.json", "w", encoding="utf-8") as file_obj:
+            path = self.root / f"{record.session_id}.json"
+            temp_path = path.with_suffix(".json.tmp")
+            with open(temp_path, "w", encoding="utf-8") as file_obj:
                 json.dump(asdict(record), file_obj, ensure_ascii=False, indent=2)
+            temp_path.replace(path)
 
     def _load_record(self, path: Path) -> SessionRecord:
         with open(path, "r", encoding="utf-8") as file_obj:

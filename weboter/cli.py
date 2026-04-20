@@ -184,6 +184,8 @@ def build_parser() -> argparse.ArgumentParser:
               weboter session workflow <session_id>
               weboter session workflow-node-detail <session_id> --node-id login
               weboter session runtime-value <session_id> --key '$flow{form}'
+              weboter session run-node <session_id> --node @temp-node.json
+              weboter session run-node <session_id> --node @temp-node.json --jump-target marker
               weboter session update-breakpoints <session_id> --breakpoints '[{"phase":"before_step","node_id":"login"}]'
               weboter session page-run-script <session_id> --code @script.py --arg '{"mode":"debug"}'
               weboter session resume <session_id>
@@ -206,6 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
             "jump-node",
             "patch-node",
             "add-node",
+            "run-node",
             "workflow",
             "workflow-node-detail",
             "runtime-value",
@@ -226,6 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
     session_parser.add_argument("--node-id", help="节点 ID")
     session_parser.add_argument("--patch", help="节点 patch JSON，或 @文件路径")
     session_parser.add_argument("--node", help="节点定义 JSON，或 @文件路径")
+    session_parser.add_argument("--jump-target", help="run-node 后跳转到的目标节点 ID；不传则回到原节点")
     session_parser.add_argument("--breakpoints", help="断点 JSON 数组，或 @文件路径")
     session_parser.add_argument("--breakpoint-ids", help="逗号分隔的 breakpoint id 列表")
     session_parser.add_argument("--append", action="store_true", help="update-breakpoints 时以追加模式工作，而不是替换")
@@ -621,6 +625,18 @@ def main() -> int:
                 if not args.node:
                     parser.error("session add-node 需要 --node")
                 _print_result(client.add_session_node(args.session_id, _load_json_arg(args.node)), args.json)
+                return 0
+            if args.action == "run-node":
+                if not args.node:
+                    parser.error("session run-node 需要 --node")
+                _print_result(
+                    client.run_session_temporary_node(
+                        args.session_id,
+                        _load_json_arg(args.node),
+                        jump_to_node_id=args.jump_target,
+                    ),
+                    args.json,
+                )
                 return 0
             if args.action == "workflow":
                 _print_result(client.get_session_workflow(args.session_id), args.json)

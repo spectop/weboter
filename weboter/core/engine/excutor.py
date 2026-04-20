@@ -38,12 +38,6 @@ class Executor:
             self.logger.addHandler(handler)
 
         self.logger.info(f">> Workflow '{flow.name}' loaded with {len(flow.nodes)} nodes and {len(flow.sub_flows)} sub-flows")
-        if self.hooks and hasattr(self.hooks, "on_workflow_loaded"):
-            import asyncio
-            maybe_coro = self.hooks.on_workflow_loaded(self, flow)
-            if asyncio.iscoroutine(maybe_coro):
-                # load_workflow may be called before any event loop exists.
-                pass
 
     def extract_outputs(self, node: Node, io: IOPipeImpl):
         pw_inst = io.outputs.get('__pw_inst__', None)

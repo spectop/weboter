@@ -254,6 +254,17 @@ class WorkflowServiceClient:
     def add_session_node(self, session_id: str, node: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", f"/sessions/{session_id}/add-node", {"node": node})
 
+    def run_session_temporary_node(
+        self,
+        session_id: str,
+        node: dict[str, Any],
+        jump_to_node_id: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"node": node}
+        if jump_to_node_id:
+            payload["jump_to_node_id"] = jump_to_node_id
+        return self._request("POST", f"/sessions/{session_id}/run-node", payload)
+
     def get_session_workflow(self, session_id: str) -> dict[str, Any]:
         return self._request("GET", f"/sessions/{session_id}/workflow")
 

@@ -41,8 +41,9 @@ QUICKSTART_PROMPT = """
 6. 用 task_get、task_logs 跟踪任务状态；如果 session 已停住，再用 session_get、session_snapshots、session_workflow 读取第一现场。
 7. 如果不确定某个 action / control 需要什么参数，先用 action_get / control_get 读取契约，再决定如何 patch workflow。
 8. 需要改流程时，优先用 session_patch_node、session_add_node、session_jump_node、session_set_context。
-9. 需要页面调试时，优先用 session_page_snapshot 获取 HTML/截图，再用 session_page_run_script 执行受控 Playwright 脚本。
-10. 修改完成后用 session_resume 恢复，或用 session_abort 终止。
+9. 如果只是想在当前页面/上下文里临时试一个动作，优先用 session_run_node，而不是反复重建 workflow。
+10. 需要页面调试时，优先用 session_page_snapshot 获取 HTML/截图，再用 session_page_run_script 执行受控 Playwright 脚本。
+11. 修改完成后用 session_resume 恢复，或用 session_abort 终止。
 
 典型 debug 流程：
 - 停在开始前：`workflow_submit_managed(name="demo", pause_before_start=True)`
@@ -51,6 +52,7 @@ QUICKSTART_PROMPT = """
 - 读取上下文：`session_get(session_id)` + `session_snapshots(session_id)` + `session_workflow(session_id)`
 - 调页面：先 `session_page_snapshot(session_id)`，再 `session_page_run_script(session_id, code=...)`
 - 改流程：`session_patch_node(...)` / `session_add_node(...)` / `session_jump_node(...)`
+- 临时试动作：`session_run_node(session_id, node={...})`
 - 放行继续：`session_resume(session_id)`
 
 命名规则：
@@ -81,6 +83,7 @@ Weboter MCP 调试手册。
     - `session_patch_node()`：改现有节点定义
     - `session_add_node()`：补新节点
     - `session_jump_node()`：跳转执行路径
+    - `session_run_node()`：在当前运行时里直接执行一个临时节点，默认不污染主流程
 6. 需要页面探索时：
     - 先 `session_page_snapshot()`
     - 再 `session_page_run_script()`
@@ -154,6 +157,7 @@ Weboter MCP 工具选择指南。
 - `session_patch_node`
 - `session_add_node`
 - `session_jump_node`
+- `session_run_node`
 - `session_export_workflow`
 
 9. 想调试页面
@@ -238,6 +242,7 @@ def _profile_tools(profile: str) -> set[str]:
             "session_jump_node",
             "session_patch_node",
             "session_add_node",
+            "session_run_node",
             "session_workflow",
             "session_workflow_node_detail",
             "session_runtime_value",
@@ -281,6 +286,7 @@ def _profile_tools(profile: str) -> set[str]:
             "session_jump_node",
             "session_patch_node",
             "session_add_node",
+            "session_run_node",
             "session_workflow",
             "session_workflow_node_detail",
             "session_runtime_value",
@@ -581,6 +587,12 @@ def create_mcp_server() -> FastMCP:
         def session_add_node(session_id: str, node: dict[str, Any]) -> dict[str, Any]:
             """向执行中 workflow 动态添加一个节点。"""
             return client.add_session_node(session_id, node)
+
+    if "session_run_node" in enabled_tools:
+        @server.tool()
+        def session_run_node(session_id: str, node: dict[str, Any], jump_to_node_id: str | None = None) -> dict[str, Any]:
+            """在当前执行上下文里运行一个临时节点。默认执行后回到原节点；传 jump_to_node_id 时跳到指定节点。"""
+            return client.run_session_temporary_node(session_id, node, jump_to_node_id=jump_to_node_id)
 
     if "session_workflow" in enabled_tools:
         @server.tool()

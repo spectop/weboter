@@ -51,11 +51,32 @@ class _FakeRuntime:
     def set_current_node(self, node_id: str):
         self.current_node_id = node_id
 
+    def switch_outputs(self):
+        current = self._values.get("$cur_outputs{result}")
+        if current is not None:
+            self._values["$prev_outputs{result}"] = current
+            self._values["$cur_outputs{result}"] = None
+
 
 class _FakeExecutor:
     def __init__(self, flow: Flow, node: Node, page=None):
         self.workflow = flow
         self.runtime = _FakeRuntime(node, page=page)
+        self._action_calls = []
+
+    def prepare_action_io(self, node: Node):
+        io = types.SimpleNamespace(inputs=dict(node.inputs), outputs={})
+        return io
+
+    async def exec_action(self, action_name: str, io):
+        self._action_calls.append(action_name)
+        io.outputs["result"] = f"ran:{action_name}"
+
+    def extract_outputs(self, node: Node, io):
+        self.runtime.set_value("$cur_outputs{result}", io.outputs.get("result"))
+
+    def prepare_control_io(self, node: Node):
+        return types.SimpleNamespace(params=dict(node.params))
 
 
 class _FakePage:
@@ -214,3 +235,96 @@ class SessionDebugTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["key"], "$flow{form}")
         self.assertEqual(result["value"]["type"], "dict")
         self.assertIn("items", result["value"])
+
+    async def test_temporary_node_runs_in_current_session_without_changing_main_node(self):
+        executor = _FakeExecutor(self.flow, self.node)
+        self.session._active_executor = executor
+
+        result = await self.session._apply_command(
+            "run_temporary_node",
+            {
+                "node": {
+                    "node_id": "temp-1",
+                    "name": "Temp Action",
+                    "action": "builtin.TempAction",
+                    "inputs": {"value": "$flow{value}"},
+                }
+            },
+            executor,
+        )
+
+        self.assertEqual(result["current_node_id"], "node-1")
+        self.assertFalse(result["jumped"])
+        self.assertEqual(result["outputs"]["items"]["result"], "ran:builtin.TempAction")
+        self.assertEqual(executor.runtime.current_node_id, "node-1")
+        self.assertEqual(executor._action_calls, ["builtin.TempAction"])
+
+    async def test_temporary_node_can_jump_to_target_node(self):
+        target = Node(
+            node_id="marker",
+            name="Marker",
+            description="",
+            action="",
+            control="builtin.NextNode",
+        )
+        self.flow.nodes.append(target)
+        executor = _FakeExecutor(self.flow, self.node)
+        executor.runtime.nodes[target.node_id] = target
+        self.session._active_executor = executor
+
+        result = await self.session._apply_command(
+            "run_temporary_node",
+            {
+                "node": {
+                    "node_id": "temp-2",
+                    "name": "Temp Jump",
+                    "action": "builtin.TempAction",
+                },
+                "jump_to_node_id": "marker",
+            },
+            executor,
+        )
+
+        self.assertTrue(result["jumped"])
+        self.assertEqual(result["current_node_id"], "marker")
+        self.assertEqual(executor.runtime.current_node_id, "marker")
+
+    def test_page_commands_do_not_force_pause_and_use_extended_timeout(self):
+        with mock.patch.object(self.session, "dispatch_command", return_value={"ok": True}) as dispatch:
+            result = self.manager.page_snapshot(self.session.record.session_id)
+
+        self.assertEqual(result, {"ok": True})
+        dispatch.assert_called_once_with("page_snapshot", {}, timeout=90.0, auto_pause=False)
+
+        with mock.patch.object(self.session, "dispatch_command", return_value={"ok": True}) as dispatch:
+            result = self.manager.page_run_script(
+                self.session.record.session_id,
+                "return 1",
+                timeout_ms=120000,
+            )
+
+        self.assertEqual(result, {"ok": True})
+        dispatch.assert_called_once_with(
+            "page_run_script",
+            {"code": "return 1", "arg": None, "timeout_ms": 120000},
+            timeout=135.0,
+            auto_pause=False,
+        )
+
+    async def test_page_snapshot_can_dispatch_immediately_while_runtime_loop_is_active(self):
+        page = _FakePage()
+        executor = _FakeExecutor(self.flow, self.node, page=page)
+        self.session._active_executor = executor
+        self.session._runtime_loop = asyncio.get_running_loop()
+
+        with mock.patch.object(session_module.pw, "Page", _FakePage):
+            result = await asyncio.to_thread(
+                self.session.dispatch_command,
+                "page_snapshot",
+                {},
+                1.0,
+                False,
+            )
+
+        self.assertEqual(result["url"], "about:blank")
+        self.assertEqual(result["title"], "Fake Page")
