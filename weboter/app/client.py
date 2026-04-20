@@ -109,6 +109,37 @@ class WorkflowServiceClient:
     def service_processes(self) -> dict[str, Any]:
         return self._request("GET", "/service/processes")
 
+    def list_env(self, group: str | None = None) -> dict[str, Any]:
+        query = ""
+        if group:
+            query = "?" + urllib.parse.urlencode({"group": group})
+        return self._request("GET", f"/env{query}")
+
+    def get_env(self, name: str, reveal: bool = False) -> dict[str, Any]:
+        query = "?" + urllib.parse.urlencode({"reveal": str(reveal).lower()})
+        return self._request("GET", f"/env/{urllib.parse.quote(name, safe='')}{query}")
+
+    def set_env(self, name: str, value: Any) -> dict[str, Any]:
+        return self._request("POST", "/env", {"name": name, "value": value})
+
+    def delete_env(self, name: str) -> dict[str, Any]:
+        return self._request("DELETE", f"/env/{urllib.parse.quote(name, safe='')}")
+
+    def env_tree(self, group: str | None = None) -> dict[str, Any]:
+        query = ""
+        if group:
+            query = "?" + urllib.parse.urlencode({"group": group})
+        return self._request("GET", f"/env/tree{query}")
+
+    def import_env(self, payload: dict[str, Any], replace: bool = False) -> dict[str, Any]:
+        return self._request("POST", "/env/import", {"data": payload, "replace": replace})
+
+    def export_env(self, group: str | None = None, reveal: bool = False) -> dict[str, Any]:
+        params = {"reveal": str(reveal).lower()}
+        if group:
+            params["group"] = group
+        return self._request("GET", f"/env/export?{urllib.parse.urlencode(params)}")
+
     def service_state(self) -> dict[str, Any]:
         return self._request("GET", "/service/state")
 

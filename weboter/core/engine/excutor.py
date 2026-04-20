@@ -11,7 +11,7 @@ from weboter.public.model import *
 class Executor:
     
     def __init__(self, **kwargs):
-        self.runtime: Runtime = Runtime()
+        self.runtime: Runtime = Runtime(managed_env=kwargs.get("managed_env"))
         self.workflow: Flow | None = None
         self.action_manager = action_manager
         self.control_manager = control_manager
@@ -199,7 +199,11 @@ class Executor:
 
         self.logger.info(f'   Starting sub flow with ID: {flow_id} >>>>>>>>')
         self.logger.info('')
-        executor = Executor(logger=self.logger, hooks=self.hooks)
+        executor = Executor(
+            logger=self.logger,
+            hooks=self.hooks,
+            managed_env=self.runtime.data_context.data.get("env", {}),
+        )
         flow = self.get_subflow(flow_id)
         if not flow:
             raise ValueError(f"Sub flow '{flow_id}' not found")

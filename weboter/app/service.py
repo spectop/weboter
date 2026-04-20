@@ -8,6 +8,7 @@ import secrets
 from typing import Any
 
 from weboter.app.config import AppConfig, load_app_config
+from weboter.app.env_store import ManagedEnvStore
 from weboter.app.state import ServiceState, default_workspace_root
 from weboter.core.bootstrap import ensure_builtin_packages_registered
 from weboter.core.engine.action_manager import action_manager
@@ -32,6 +33,7 @@ class WorkflowService:
         self.service_state_path = self.data_root / "service.json"
         self.service_log_path = self.data_root / "service.log"
         self.secret_state_path = config.service_secret_state_path()
+        self.env_store = ManagedEnvStore(self.data_root / "env.json")
 
     def _read_secret_state(self) -> dict[str, Any]:
         if not self.secret_state_path.is_file():
@@ -166,10 +168,31 @@ class WorkflowService:
     def run_workflow(self, workflow_path: Path, logger: logging.Logger | None = None, hooks: Any | None = None) -> Path:
         ensure_builtin_packages_registered()
         flow = WorkflowReader.from_json(workflow_path)
-        executor = Executor(logger=logger, hooks=hooks)
+        executor = Executor(logger=logger, hooks=hooks, managed_env=self.env_store.export_env_mapping())
         executor.load_workflow(flow)
         asyncio.run(executor.run())
         return workflow_path
+
+    def list_env(self, group: str | None = None) -> dict[str, Any]:
+        return self.env_store.list_items(group)
+
+    def get_env(self, name: str, reveal: bool = False) -> dict[str, Any]:
+        return self.env_store.get(name, reveal=reveal)
+
+    def set_env(self, name: str, value: Any) -> dict[str, Any]:
+        return self.env_store.set(name, value)
+
+    def delete_env(self, name: str) -> dict[str, Any]:
+        return self.env_store.delete(name)
+
+    def env_tree(self, group: str | None = None) -> dict[str, Any]:
+        return self.env_store.tree(group)
+
+    def import_env(self, payload: dict[str, Any], replace: bool = False) -> dict[str, Any]:
+        return self.env_store.import_items(payload, replace=replace)
+
+    def export_env(self, group: str | None = None, reveal: bool = False) -> dict[str, Any]:
+        return self.env_store.export_items(group, reveal=reveal)
 
     def list_actions(self) -> dict[str, Any]:
         ensure_builtin_packages_registered()

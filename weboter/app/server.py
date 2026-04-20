@@ -248,6 +248,16 @@ class SessionPageFillRequest(BaseModel):
     timeout: int = 5000
 
 
+class EnvSetRequest(BaseModel):
+    name: str
+    value: Any
+
+
+class EnvImportRequest(BaseModel):
+    data: dict[str, Any]
+    replace: bool = False
+
+
 def _configure_service_logger(workflow_service: WorkflowService) -> logging.Logger:
     logger = logging.getLogger("weboter.service")
     logger.setLevel(logging.INFO)
@@ -274,7 +284,7 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     api_token = service.get_api_token() or ""
     app = FastAPI(
         title="Weboter Local Service",
-        version="0.1.11",
+        version="0.1.13",
         summary="Weboter 本地 workflow 执行服务",
     )
     app.state.workflow_service = service
@@ -373,6 +383,55 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     def service_processes() -> dict[str, Any]:
         try:
             return list_service_processes(service)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.get("/env", tags=["env"])
+    def list_env(group: str | None = Query(default=None)) -> dict[str, Any]:
+        try:
+            return service.list_env(group)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.get("/env/tree", tags=["env"])
+    def env_tree(group: str | None = Query(default=None)) -> dict[str, Any]:
+        try:
+            return service.env_tree(group)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.get("/env/{name:path}", tags=["env"])
+    def get_env(name: str, reveal: bool = Query(default=False)) -> dict[str, Any]:
+        try:
+            return service.get_env(name, reveal=reveal)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/env", tags=["env"])
+    def set_env(payload: EnvSetRequest) -> dict[str, Any]:
+        try:
+            return service.set_env(payload.name, payload.value)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.delete("/env/{name:path}", tags=["env"])
+    def delete_env(name: str) -> dict[str, Any]:
+        try:
+            return service.delete_env(name)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/env/import", tags=["env"])
+    def import_env(payload: EnvImportRequest) -> dict[str, Any]:
+        try:
+            return service.import_env(payload.data, replace=payload.replace)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.get("/env/export", tags=["env"])
+    def export_env(group: str | None = Query(default=None), reveal: bool = Query(default=False)) -> dict[str, Any]:
+        try:
+            return service.export_env(group, reveal=reveal)
         except Exception as exc:
             _raise_http_error(exc)
 

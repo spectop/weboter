@@ -78,6 +78,17 @@
 }
 ```
 
+除了系统 shell 环境变量，Weboter 还支持 service 内部受管环境变量。推荐把账号、密码、token 等隐私数据写入 service 内部环境变量，再在 workflow 中通过点号分组引用：
+
+```json
+{
+  "username": "$env{xxx.username}",
+  "password": "$env{xxx.password}"
+}
+```
+
+其中 `xxx.username`、`xxx.password` 可以通过 CLI `weboter env set ...` 或对应 service / MCP 接口进行管理。这样 workflow 文件本身无需直接保存敏感值。
+
 ## control
 
 表示该节点的执行控制逻辑。(默认值为 `builtin.NextNode`)

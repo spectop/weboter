@@ -13,6 +13,8 @@ Weboter 是一个通过远程 service 执行 workflow 的 MCP adapter。
 使用要点：
 - 先调用 service_status，确认 service.health.status 为 ok。
 - 如果怀疑 stop 后仍有残留进程，可调用 service_processes 查看当前 service 进程组。
+- 需要让 workflow 使用隐私数据时，优先把值写入 service 内部受管环境变量，再在 workflow 里引用 `$env{group.key}`。
+- 如果只想先确认分组结构，优先调用 env_tree，再决定是否读取单项或导出。
 - workflow_list 返回的是 service 感知的逻辑名，不带 .json 后缀；多层目录会显示为点号名，例如 pack_a.pack_b.do_sth。
 - 需要执行现有受管 workflow 时，优先使用 workflow_submit_managed(name=...)；如果要调试首个节点，直接在提交时带上 pause_before_start 或 breakpoints。
 - 需要上传本地 workflow 文件时，使用 workflow_submit_upload(path=...)；同样支持在提交时预设调试参数。
@@ -104,24 +106,33 @@ Weboter MCP 工具选择指南。
 - `service_logs`
 - `service_processes`
 
-2. 想找 workflow 或发起执行
+2. 想管理 service 内部环境变量
+- `env_list`
+- `env_tree`
+- `env_get`
+- `env_set`
+- `env_delete`
+- `env_import`
+- `env_export`
+
+3. 想找 workflow 或发起执行
 - `workflow_list`
 - `workflow_submit_managed`
 - `workflow_submit_upload`
 - `workflow_delete_managed`（仅 admin）
 
-3. 想确认环境里有哪些 action / control 以及参数约定
+4. 想确认环境里有哪些 action / control 以及参数约定
 - `action_list`
 - `action_get`
 - `control_list`
 - `control_get`
 
-4. 想跟踪任务结果
+5. 想跟踪任务结果
 - `task_list`
 - `task_get`
 - `task_logs`
 
-5. 想观察会话当前状态
+6. 想观察会话当前状态
 - `session_list`
 - `session_get`
 - `session_snapshots`
@@ -130,7 +141,7 @@ Weboter MCP 工具选择指南。
 - `session_workflow_node_detail`
 - `session_runtime_value`
 
-6. 想让执行停住或继续
+7. 想让执行停住或继续
 - `workflow_submit_*` + `pause_before_start`
 - `workflow_submit_*` + `breakpoints`
 - `session_interrupt`
@@ -138,14 +149,14 @@ Weboter MCP 工具选择指南。
 - `session_resume`
 - `session_abort`
 
-7. 想修改执行中的 workflow
+8. 想修改执行中的 workflow
 - `session_set_context`
 - `session_patch_node`
 - `session_add_node`
 - `session_jump_node`
 - `session_export_workflow`
 
-8. 想调试页面
+9. 想调试页面
 - `session_page_snapshot`
 - `session_page_run_script`
 
@@ -175,6 +186,10 @@ def _profile_tools(profile: str) -> set[str]:
             "service_status",
             "service_logs",
             "service_processes",
+            "env_list",
+            "env_tree",
+            "env_get",
+            "env_export",
             "action_list",
             "action_get",
             "control_list",
@@ -194,6 +209,13 @@ def _profile_tools(profile: str) -> set[str]:
             "service_status",
             "service_logs",
             "service_processes",
+            "env_list",
+            "env_tree",
+            "env_get",
+            "env_set",
+            "env_delete",
+            "env_import",
+            "env_export",
             "action_list",
             "action_get",
             "control_list",
@@ -229,6 +251,13 @@ def _profile_tools(profile: str) -> set[str]:
             "service_status",
             "service_logs",
             "service_processes",
+            "env_list",
+            "env_tree",
+            "env_get",
+            "env_set",
+            "env_delete",
+            "env_import",
+            "env_export",
             "action_list",
             "action_get",
             "control_list",
@@ -334,6 +363,58 @@ def create_mcp_server() -> FastMCP:
         def service_processes() -> dict[str, Any]:
             """读取当前 service 进程组中的进程列表，用于排查 Playwright 或浏览器残留进程。"""
             return client.service_processes()
+
+    if "env_list" in enabled_tools:
+        @server.tool()
+        def env_list(group: str | None = None, limit: int = 50) -> dict[str, Any]:
+            """列出 service 内部受管环境变量摘要。默认返回掩码值和分组信息。"""
+            result = client.list_env(group)
+            items = result.get("items") or []
+            limited = items[:clamp_limit(limit, 50, 100)]
+            return {
+                "group": result.get("group"),
+                "groups": result.get("groups") or [],
+                "items": limited,
+                "total_count": len(items),
+                "returned_count": len(limited),
+                "remaining_count": max(len(items) - len(limited), 0),
+            }
+
+    if "env_tree" in enabled_tools:
+        @server.tool()
+        def env_tree(group: str | None = None) -> dict[str, Any]:
+            """读取受管环境变量分组树摘要，不直接返回完整值。"""
+            return client.env_tree(group)
+
+    if "env_get" in enabled_tools:
+        @server.tool()
+        def env_get(name: str, reveal: bool = False) -> dict[str, Any]:
+            """读取单个受管环境变量。默认返回掩码值；仅在确有必要时再显式 reveal。"""
+            return client.get_env(name, reveal=reveal)
+
+    if "env_set" in enabled_tools:
+        @server.tool()
+        def env_set(name: str, value: Any) -> dict[str, Any]:
+            """写入或更新 service 内部受管环境变量，支持点号分组。"""
+            return client.set_env(name, value)
+
+    if "env_delete" in enabled_tools:
+        @server.tool()
+        def env_delete(name: str) -> dict[str, Any]:
+            """删除单个 service 内部受管环境变量。"""
+            return client.delete_env(name)
+
+    if "env_import" in enabled_tools:
+        @server.tool()
+        def env_import(data: dict[str, Any], replace: bool = False) -> dict[str, Any]:
+            """批量导入受管环境变量。replace=True 时会整体替换现有 env store。"""
+            return client.import_env(data, replace=replace)
+
+    if "env_export" in enabled_tools:
+        @server.tool()
+        def env_export(group: str | None = None, reveal: bool = False) -> dict[str, Any]:
+            """导出受管环境变量。默认返回掩码值；需要原值时再显式 reveal。"""
+            return client.export_env(group, reveal=reveal)
 
     if "action_list" in enabled_tools:
         @server.tool()

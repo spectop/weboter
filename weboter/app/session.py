@@ -181,7 +181,7 @@ class ExecutionSession:
             "session_id": self.record.session_id,
             "task_id": self.record.task_id,
             "key": key,
-            "value": self._serialize_runtime_preview(value),
+            "value": self._serialize_runtime_preview(value, sensitive=key.startswith("$env{")),
         }
 
     def dispatch_command(
@@ -590,21 +590,28 @@ class ExecutionSession:
         return compile(wrapped, "<weboter-page-script>", "exec")
 
     @staticmethod
-    def _serialize_runtime(data: Any) -> Any:
+    def _serialize_runtime(data: Any, sensitive: bool = False) -> Any:
+        if sensitive:
+            return ExecutionSession._mask_runtime_value(data)
         if isinstance(data, (str, int, float, bool)) or data is None:
             return data
         if isinstance(data, Path):
             return str(data)
         if isinstance(data, dict):
-            return {str(key): ExecutionSession._serialize_runtime(value) for key, value in data.items()}
+            return {
+                str(key): ExecutionSession._serialize_runtime(value, sensitive=(str(key) == "env"))
+                for key, value in data.items()
+            }
         if isinstance(data, list):
-            return [ExecutionSession._serialize_runtime(item) for item in data]
+            return [ExecutionSession._serialize_runtime(item, sensitive=sensitive) for item in data]
         if isinstance(data, tuple):
-            return [ExecutionSession._serialize_runtime(item) for item in data]
+            return [ExecutionSession._serialize_runtime(item, sensitive=sensitive) for item in data]
         return {"type": type(data).__name__, "repr": repr(data)}
 
     @staticmethod
-    def _serialize_runtime_preview(data: Any, depth: int = 0) -> Any:
+    def _serialize_runtime_preview(data: Any, depth: int = 0, sensitive: bool = False) -> Any:
+        if sensitive:
+            return ExecutionSession._mask_runtime_value(data)
         if depth >= 2:
             if isinstance(data, dict):
                 return {
@@ -625,7 +632,11 @@ class ExecutionSession:
             keys = list(data.keys())
             items = {}
             for key in keys[:20]:
-                items[str(key)] = ExecutionSession._serialize_runtime_preview(data[key], depth + 1)
+                items[str(key)] = ExecutionSession._serialize_runtime_preview(
+                    data[key],
+                    depth + 1,
+                    sensitive=(str(key) == "env"),
+                )
             return {
                 "type": "dict",
                 "key_count": len(data),
@@ -636,19 +647,44 @@ class ExecutionSession:
             return {
                 "type": "list",
                 "item_count": len(data),
-                "items": [ExecutionSession._serialize_runtime_preview(item, depth + 1) for item in data[:20]],
+                "items": [ExecutionSession._serialize_runtime_preview(item, depth + 1, sensitive=sensitive) for item in data[:20]],
                 "truncated": len(data) > 20,
             }
         if isinstance(data, tuple):
             return {
                 "type": "tuple",
                 "item_count": len(data),
-                "items": [ExecutionSession._serialize_runtime_preview(item, depth + 1) for item in list(data)[:20]],
+                "items": [ExecutionSession._serialize_runtime_preview(item, depth + 1, sensitive=sensitive) for item in list(data)[:20]],
                 "truncated": len(data) > 20,
             }
         if isinstance(data, str):
             return ExecutionSession._truncate_string(data, 500)
         return ExecutionSession._serialize_runtime(data)
+
+    @staticmethod
+    def _mask_runtime_value(data: Any) -> Any:
+        if data is None:
+            return None
+        if isinstance(data, str):
+            if not data:
+                return ""
+            if len(data) <= 4:
+                return "*" * len(data)
+            return f"{data[:2]}***{data[-2:]}"
+        if isinstance(data, (int, float, bool)):
+            return "***"
+        if isinstance(data, dict):
+            return {
+                "type": "dict",
+                "key_count": len(data),
+                "keys": sorted(str(key) for key in data.keys()),
+                "masked": True,
+            }
+        if isinstance(data, list):
+            return {"type": "list", "item_count": len(data), "masked": True}
+        if isinstance(data, tuple):
+            return {"type": "tuple", "item_count": len(data), "masked": True}
+        return "***"
 
     @staticmethod
     def _truncate_string(value: str, limit: int) -> dict[str, Any] | str:

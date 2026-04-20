@@ -178,6 +178,13 @@ class ClickItem(ActionBase):
             required=False,
             accepted_types=["boolean"],
             default=False
+        ),
+        InputFieldDeclaration(
+            name="force",
+            description="Whether to force the click even if the target is covered by another element",
+            required=False,
+            accepted_types=["boolean"],
+            default=False
         )
     ]
     outputs: list[OutputFieldDeclaration] = []
@@ -207,13 +214,14 @@ class ClickItem(ActionBase):
         element = utils.get_locator(scope, locator)
 
         no_error = inputs.get("no_error", False)
+        force = inputs.get("force", False)
         if no_error:
             try:
-                await element.click(timeout=timeout)
+                await element.click(timeout=timeout, force=force)
             except pw.TimeoutError:
                 pass
         else:
-            await element.click(timeout=timeout)
+            await element.click(timeout=timeout, force=force)
 
 class FillInput(ActionBase):
     """Action to fill an input field on the web page given a locator."""

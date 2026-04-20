@@ -2,6 +2,7 @@ LICENSE
 README.md
 pyproject.toml
 tests/test_contract_catalog.py
+tests/test_managed_env.py
 tests/test_service_control.py
 tests/test_session_debug.py
 weboter/__main__.py
@@ -14,6 +15,7 @@ weboter.egg-info/requires.txt
 weboter.egg-info/top_level.txt
 weboter/app/client.py
 weboter/app/config.py
+weboter/app/env_store.py
 weboter/app/server.py
 weboter/app/service.py
 weboter/app/session.py

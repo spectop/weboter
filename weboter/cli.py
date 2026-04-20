@@ -78,6 +78,36 @@ def build_parser() -> argparse.ArgumentParser:
     service_parser.add_argument("--json", action="store_true", help="以 JSON 输出 service 结果")
     service_parser.add_argument("--foreground", action="store_true", help=argparse.SUPPRESS)
 
+    env_parser = subparsers.add_parser(
+        "env",
+        help="管理 service 内部环境变量",
+        description="管理 service 内部受管环境变量，支持点号分组，并可在 workflow 中通过 $env{group.key} 引用。",
+        epilog=textwrap.dedent(
+            """
+            示例:
+              weboter env list
+                            weboter env tree
+              weboter env list --group xxx
+              weboter env get xxx.username
+              weboter env set xxx.username alice
+                            weboter env import --path env.json
+                            weboter env export --path env.json --reveal
+              weboter env set xxx.password --value @secret.txt
+              weboter env delete xxx.password
+            """
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    env_parser.add_argument("action", choices=["list", "tree", "get", "set", "delete", "import", "export"])
+    env_parser.add_argument("name", nargs="?", help="环境变量名，例如 xxx.username")
+    env_parser.add_argument("value_arg", nargs="?", help="set 时的值，或 @文件路径")
+    env_parser.add_argument("--group", help="按分组查看，例如 xxx")
+    env_parser.add_argument("--value", help="set 时的值，优先于位置参数")
+    env_parser.add_argument("--path", type=Path, help="import/export 时使用的 JSON 文件路径")
+    env_parser.add_argument("--replace", action="store_true", help="import 时整体替换原有 env store")
+    env_parser.add_argument("--json", action="store_true", help="以 JSON 输出环境变量结果")
+    env_parser.add_argument("--reveal", action="store_true", help="get 时显示原始值，而不是掩码")
+
     workflow_parser = subparsers.add_parser(
         "workflow",
         help="管理或执行 workflow",
@@ -282,6 +312,35 @@ def _print_result(result: dict, json_output: bool = False) -> None:
             cmdline = " ".join(item.get("cmdline") or []) or item.get("comm") or ""
             print(f"{item['pid']}  ppid={item['ppid']}  pgid={item['pgid']}  state={item['state']}  kind={item.get('kind')}  {cmdline}")
         return
+    if "items" in result and result["items"] and isinstance(result["items"][0], dict) and "masked_value" in result["items"][0]:
+        groups = result.get("groups") or []
+        if groups:
+            print("groups:")
+            for group in groups:
+                print(f"- {group['name']} ({group['item_count']})")
+        for item in result["items"]:
+            print(f"{item['name']}  type={item.get('value_type')}  value={item.get('masked_value')}")
+        return
+    if "groups" in result and result.get("groups") and not result.get("items"):
+        print("groups:")
+        for group in result["groups"]:
+            print(f"- {group['name']} ({group['item_count']})")
+        return
+    if "tree" in result and isinstance(result["tree"], dict):
+        _print_env_tree(result["tree"])
+        return
+    if "name" in result and "value_type" in result and "value" in result:
+        print(f"{result['name']}  type={result.get('value_type')}  value={result.get('value')}")
+        return
+    if "saved_path" in result:
+        print(f"saved: {result['saved_path']}")
+        return
+    if "saved" in result:
+        print(f"saved: {result['saved']} = {result.get('masked_value')}")
+        return
+    if "imported" in result:
+        print(f"imported: count={result.get('item_count')} replace={result.get('replace')}")
+        return
 
     if "uploaded" in result:
         print(f"uploaded: {result['uploaded']}")
@@ -298,6 +357,20 @@ def _tail_local_file(path: Path, lines: int) -> dict:
         return {"log_path": str(path), "content": ""}
     content = path.read_text(encoding="utf-8")
     return {"log_path": str(path), "content": "\n".join(content.splitlines()[-lines:])}
+
+
+def _write_json_file(path: Path, payload: dict) -> dict:
+    target = path.expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"saved_path": str(target)}
+
+
+def _print_env_tree(node: dict, depth: int = 0) -> None:
+    name = node.get("name") or "<root>"
+    print(f"{'  ' * depth}{name} ({node.get('item_count', 0)})")
+    for child in node.get("children") or []:
+        _print_env_tree(child, depth + 1)
 
 
 def _build_local_task_manager(service, task_manager_cls):
@@ -378,6 +451,75 @@ def main() -> int:
                     _print_result(list_service_processes(workflow_service), args.json)
                 return 0
         except (RuntimeError, ServiceClientError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+
+    if args.command == "env":
+        service = None
+        client = WorkflowServiceClient()
+        try:
+            WorkflowService, _, _, _, _, _, _, _ = _load_local_service_stack()
+            service = WorkflowService()
+            client = WorkflowServiceClient(service)
+        except RuntimeError:
+            pass
+        try:
+            if args.action == "list":
+                if service is not None:
+                    _print_result(service.list_env(args.group), args.json)
+                else:
+                    _print_result(client.list_env(args.group), args.json)
+                return 0
+            if args.action == "tree":
+                if service is not None:
+                    _print_result(service.env_tree(args.group), args.json)
+                else:
+                    _print_result(client.env_tree(args.group), args.json)
+                return 0
+            if args.action == "import":
+                if args.path is None:
+                    parser.error("env import 需要 --path")
+                payload = _load_json_arg(f"@{args.path}")
+                if service is not None:
+                    _print_result(service.import_env(payload, replace=args.replace), args.json)
+                else:
+                    _print_result(client.import_env(payload, replace=args.replace), args.json)
+                return 0
+            if args.action == "export":
+                if service is not None:
+                    result = service.export_env(args.group, reveal=args.reveal)
+                else:
+                    result = client.export_env(args.group, reveal=args.reveal)
+                if args.path is not None:
+                    _print_result(_write_json_file(args.path, result["data"]), args.json)
+                else:
+                    _print_result(result, args.json)
+                return 0
+            if not args.name:
+                parser.error("env 命令除 list/tree/import/export 外必须提供 name")
+            if args.action == "get":
+                if service is not None:
+                    _print_result(service.get_env(args.name, reveal=args.reveal), args.json)
+                else:
+                    _print_result(client.get_env(args.name, reveal=args.reveal), args.json)
+                return 0
+            if args.action == "set":
+                raw_value = args.value if args.value is not None else args.value_arg
+                if raw_value is None:
+                    parser.error("env set 需要 value")
+                value = _load_json_arg(raw_value, allow_plain_string=True)
+                if service is not None:
+                    _print_result(service.set_env(args.name, value), args.json)
+                else:
+                    _print_result(client.set_env(args.name, value), args.json)
+                return 0
+            if args.action == "delete":
+                if service is not None:
+                    _print_result(service.delete_env(args.name), args.json)
+                else:
+                    _print_result(client.delete_env(args.name), args.json)
+                return 0
+        except (RuntimeError, ServiceClientError, OSError, ValueError, KeyError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
 

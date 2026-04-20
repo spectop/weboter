@@ -32,6 +32,7 @@ python -m pip install -e .
 ```bash
 python -m pip install -e '.[service]'
 playwright install chromium
+playwright install-deps
 ```
 
 如果需要浏览器伪装或验证码相关动作，再追加可选依赖：

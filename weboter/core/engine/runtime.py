@@ -139,11 +139,11 @@ class DataContext:
 
 class Runtime:
     
-    def __init__(self):
+    def __init__(self, managed_env: dict | None = None):
         self.flow: Flow | None = None
         self.nodes = {}
         self.data_context = DataContext()
-        self.__load_environment()
+        self.__load_environment(managed_env)
         self.current_node_id: str | None = None
     
     def finished(self) -> bool:
@@ -193,9 +193,19 @@ class Runtime:
     def copy_data(self, other: 'Runtime', prefix: str = ""):
         self.data_context.copy_data(other.data_context, prefix)
 
-    def __load_environment(self):
-        # 加载环境变量到数据上下文
+    def __load_environment(self, managed_env: dict | None = None):
+        # 先加载系统环境变量，再加载 service 内部受管环境变量，后者可以覆盖前者。
         import os
         for key, value in os.environ.items():
             self.data_context.set_data(f"$env{{{key}}}", value)
+        if managed_env:
+            self.__load_env_mapping(managed_env)
+
+    def __load_env_mapping(self, data: dict, prefix: str = ""):
+        for key, value in data.items():
+            name = f"{prefix}.{key}" if prefix else key
+            if isinstance(value, dict):
+                self.__load_env_mapping(value, name)
+                continue
+            self.data_context.set_data(f"$env{{{name}}}", value)
     

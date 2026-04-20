@@ -42,9 +42,33 @@ weboter service ps
 weboter service ps --json
 ```
 
+管理 service 内部受管环境变量：
+
+```bash
+weboter env list
+weboter env tree
+weboter env list --group xxx
+weboter env get xxx.username
+weboter env set xxx.username alice
+weboter env import --path env.json
+weboter env export --path env.json --reveal
+weboter env set xxx.password --value @secret.txt
+weboter env delete xxx.password
+```
+
 `service stop` 现在会优先按 service 进程组发送 `SIGTERM`，等待优雅退出；如果超时未退出，再升级为 `SIGKILL`。这样在 Linux / WSL 下更容易把 service 派生出的 Playwright 浏览器进程一起回收，减少残留子进程。
 
 `service ps` 会列出当前 service 进程组内的进程，包括 `pid`、`ppid`、`pgid`、状态和命令行。排查 Playwright / 浏览器残留时，可以先看这里是否仍有 `kind=playwright` 或 `kind=browser` 的进程。
+
+`env` 命令管理的是 service 内部持久化环境变量，存储在 `.weboter/` 下，不依赖外部 shell 环境。变量名支持点号分组，例如 `xxx.username`、`xxx.password`。workflow 内可以直接通过 `$env{xxx.username}` 引用这些值。
+
+`env tree` 会只返回分组结构和每组叶子项数量，适合 agent 先确认命名空间，再按需取值。
+
+`env import --path env.json` 支持把本地 JSON 批量导入到 service 内部 env store；`--replace` 会整体替换旧内容。
+
+`env export` 支持导出全部或某个 `--group`；如果加 `--path`，CLI 会把返回内容写入本地 JSON 文件。
+
+出于隐私考虑，`env list` / `env get` / `env export` 默认返回掩码值；只有显式传 `--reveal` 时才显示原值。
 
 默认情况下，service 会把状态写入 `.weboter/service.json`；如果在 `weboter.yaml` 中固定了 `service.port`，后续 `weboter client` 或脚本可以稳定连接到该地址。
 
@@ -171,6 +195,7 @@ service 默认暴露以下接口：
 - `GET /service/state`：读取 service 元数据
 - `GET /service/logs`：读取系统日志
 - `GET /service/processes`：读取当前 service 进程组中的进程列表
+- `GET /env` / `GET /env/tree` / `GET /env/export` / `POST /env/import` / `GET /env/{name}` / `POST /env` / `DELETE /env/{name}`：管理 service 内部受管环境变量
 - `GET /catalog/actions` / `GET /catalog/actions/{full_name}`：读取 action 摘要与单项参数契约
 - `GET /catalog/controls` / `GET /catalog/controls/{full_name}`：读取 control 摘要与单项参数契约
 - `POST /workflow/upload`：上传并可选执行 workflow
@@ -188,6 +213,7 @@ service 默认暴露以下接口：
 
 针对 agent 调试，当前推荐的最小组合是：
 
+- `env`：把账号、密码、token 等隐私数据写入 service 内部受管环境变量，再在 workflow 中通过 `$env{group.key}` 引用
 - `catalog/actions` / `catalog/controls`：先确认环境里可用的 action / control，再按单项读取参数契约
 - `pause_before_start`：在提交 workflow 时直接要求第一个节点前停住，适合首轮调试
 - `interrupt`：请求在下一个节点执行前停住，适合会话已经启动后的追加介入
