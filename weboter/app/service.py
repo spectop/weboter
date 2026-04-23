@@ -10,7 +10,7 @@ from typing import Any
 from weboter.app.config import AppConfig, load_app_config
 from weboter.app.env_store import ManagedEnvStore
 from weboter.app.state import ServiceState, default_workspace_root
-from weboter.core.bootstrap import ensure_builtin_packages_registered
+from weboter.core.plugin_loader import ensure_plugins_initialized, refresh_plugins
 from weboter.core.engine.action_manager import action_manager
 from weboter.core.engine.control_manager import control_manager
 from weboter.core.engine.excutor import Executor
@@ -34,6 +34,7 @@ class WorkflowService:
         self.service_log_path = self.data_root / "service.log"
         self.secret_state_path = config.service_secret_state_path()
         self.env_store = ManagedEnvStore(self.data_root / "env.json")
+        ensure_plugins_initialized(self.config)
 
     def _read_secret_state(self) -> dict[str, Any]:
         if not self.secret_state_path.is_file():
@@ -166,7 +167,7 @@ class WorkflowService:
         return workflow_path
 
     def run_workflow(self, workflow_path: Path, logger: logging.Logger | None = None, hooks: Any | None = None) -> Path:
-        ensure_builtin_packages_registered()
+        ensure_plugins_initialized(self.config)
         flow = WorkflowReader.from_json(workflow_path)
         executor = Executor(logger=logger, hooks=hooks, managed_env=self.env_store.export_env_mapping())
         executor.load_workflow(flow)
@@ -195,28 +196,31 @@ class WorkflowService:
         return self.env_store.export_items(group, reveal=reveal)
 
     def list_actions(self) -> dict[str, Any]:
-        ensure_builtin_packages_registered()
+        ensure_plugins_initialized(self.config)
         items = [self._summarize_contract_item(item) for item in action_manager.list_actions()]
         return {"items": items}
 
     def get_action(self, full_name: str) -> dict[str, Any] | None:
-        ensure_builtin_packages_registered()
+        ensure_plugins_initialized(self.config)
         item = action_manager.describe_action(full_name)
         if item is None:
             return None
         return {"action": item}
 
     def list_controls(self) -> dict[str, Any]:
-        ensure_builtin_packages_registered()
+        ensure_plugins_initialized(self.config)
         items = [self._summarize_contract_item(item) for item in control_manager.list_controls()]
         return {"items": items}
 
     def get_control(self, full_name: str) -> dict[str, Any] | None:
-        ensure_builtin_packages_registered()
+        ensure_plugins_initialized(self.config)
         item = control_manager.describe_control(full_name)
         if item is None:
             return None
         return {"control": item}
+
+    def refresh_plugins(self) -> dict[str, Any]:
+        return refresh_plugins(self.config)
 
     def _summarize_contract_item(self, item: dict[str, Any]) -> dict[str, Any]:
         return {

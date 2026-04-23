@@ -51,10 +51,21 @@ python -m pip install -e '.[service,captcha]'
 - `paths.workspace_root`
 - `paths.data_root`
 - `paths.workflow_store`
+- `paths.PLUGIN_ROOT`（插件目录，每个子目录视为一个插件）
 - `service.host` / `service.port`
 - `service.auth.enabled` / `service.auth.token`
 - `mcp.service_url` / `mcp.profile` / `mcp.transport`
 - `client.api_token` / `client.caller_name` / `client.request_timeout`
+
+插件扩展支持两类来源：
+
+- 目录插件：放在 `paths.PLUGIN_ROOT` 下，每个子目录一个插件包（结构类似 builtin，提供 `package_name`、`actions`、`controls`）
+- 安装插件：安装形如 `weboter-http` 的分发包后，执行刷新即可加载（支持 `weboter.plugins` entry point，或 `weboter-*` 分发自动发现）
+
+刷新方式：
+
+- CLI：`weboter service refresh-plugins`
+- MCP：`plugin_refresh`
 
 ## 快速开始
 

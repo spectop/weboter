@@ -16,6 +16,8 @@ class PathsConfig:
     workspace_root: str | None = None
     data_root: str = ".weboter"
     workflow_store: str = "workflows"
+    plugin_root: str = "plugins"
+    PLUGIN_ROOT: str | None = None
 
 
 @dataclass
@@ -77,6 +79,14 @@ class AppConfig:
         candidate = Path(self.paths.workflow_store).expanduser()
         if not candidate.is_absolute():
             candidate = data_root / candidate
+        return candidate.resolve()
+
+    def plugin_root_path(self) -> Path:
+        workspace_root = self.workspace_root_path()
+        configured = self.paths.PLUGIN_ROOT or self.paths.plugin_root
+        candidate = Path(configured).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace_root / candidate
         return candidate.resolve()
 
     def service_secret_state_path(self) -> Path:
@@ -147,6 +157,10 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
     workflow_store = os.environ.get("WEBOTER_WORKFLOW_STORE", "").strip()
     if workflow_store:
         config.paths.workflow_store = workflow_store
+
+    plugin_root = os.environ.get("WEBOTER_PLUGIN_ROOT", "").strip() or os.environ.get("PLUGIN_ROOT", "").strip()
+    if plugin_root:
+        config.paths.PLUGIN_ROOT = plugin_root
 
     service_host = os.environ.get("WEBOTER_SERVICE_HOST", "").strip()
     if service_host:

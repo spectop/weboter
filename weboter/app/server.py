@@ -289,7 +289,7 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     api_token = service.get_api_token() or ""
     app = FastAPI(
         title="Weboter Local Service",
-        version="0.1.16",
+        version="0.1.17",
         summary="Weboter 本地 workflow 执行服务",
     )
     app.state.workflow_service = service
@@ -461,6 +461,13 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
         if item is None:
             raise HTTPException(status_code=404, detail=f"control not found: {full_name}")
         return item
+
+    @app.post("/catalog/refresh", tags=["catalog"])
+    def refresh_catalog() -> dict[str, Any]:
+        try:
+            return service.refresh_plugins()
+        except Exception as exc:
+            _raise_http_error(exc)
 
     @app.get("/tasks", tags=["task"])
     def list_tasks(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:

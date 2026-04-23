@@ -37,6 +37,7 @@ QUICKSTART_PROMPT = """
 2. 调用 workflow_list 查看当前 service 可感知的 workflow 逻辑名。
 3. 如果只是正常执行，调用 workflow_submit_managed 或 workflow_submit_upload。
 4. 如果你要调试首个节点，提交时直接传 `pause_before_start=True`；如果你要停在特定节点前，提交时直接传 `breakpoints=[{"phase": "before_step", "node_id": "..."}]`。
+4.1 如果你刚安装了新插件（目录插件或 pip 安装插件），先调用 `plugin_refresh()` 再查询 action/control catalog。
 5. 提交结果里的 `task.session_id` 就是本次会话 ID，不需要等任务跑完再查 session。
 6. 用 task_get、task_logs 跟踪任务状态；如果 session 已停住，再用 session_get、session_snapshots、session_workflow 读取第一现场。
 7. 如果不确定某个 action / control 需要什么参数，先用 action_get / control_get 读取契约，再决定如何 patch workflow。
@@ -125,6 +126,7 @@ Weboter MCP 工具选择指南。
 - `workflow_delete_managed`（仅 admin）
 
 4. 想确认环境里有哪些 action / control 以及参数约定
+- `plugin_refresh`
 - `action_list`
 - `action_get`
 - `control_list`
@@ -198,6 +200,7 @@ def _profile_tools(profile: str) -> set[str]:
             "action_get",
             "control_list",
             "control_get",
+            "plugin_refresh",
             "workflow_list",
             "task_list",
             "task_get",
@@ -224,6 +227,7 @@ def _profile_tools(profile: str) -> set[str]:
             "action_get",
             "control_list",
             "control_get",
+            "plugin_refresh",
             "workflow_list",
             "workflow_submit_upload",
             "workflow_submit_managed",
@@ -427,6 +431,12 @@ def create_mcp_server() -> FastMCP:
         def action_list(limit: int = 50) -> dict[str, Any]:
             """列出当前环境已注册 action 的摘要。需要参数约定时，继续调用 action_get。"""
             return summarize_named_items(client.list_actions(), clamp_limit(limit, 50, 100))
+
+    if "plugin_refresh" in enabled_tools:
+        @server.tool()
+        def plugin_refresh() -> dict[str, Any]:
+            """刷新插件注册：重新扫描 PLUGIN_ROOT 和已安装插件，再更新 action/control catalog。"""
+            return client.refresh_plugins()
 
     if "action_get" in enabled_tools:
         @server.tool()

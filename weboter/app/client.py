@@ -155,6 +155,9 @@ class WorkflowServiceClient:
     def get_control(self, full_name: str) -> dict[str, Any]:
         return self._request("GET", f"/catalog/controls/{urllib.parse.quote(full_name, safe='')}")
 
+    def refresh_plugins(self) -> dict[str, Any]:
+        return self._request("POST", "/catalog/refresh", {})
+
     def upload_workflow(
         self,
         source: Path,

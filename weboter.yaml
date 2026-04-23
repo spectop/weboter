@@ -2,6 +2,7 @@ paths:
   workspace_root: .
   data_root: .weboter
   workflow_store: workflows
+  PLUGIN_ROOT: plugins
 
 service:
   host: 127.0.0.1

@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    service_parser.add_argument("action", choices=["start", "restart", "stop", "status", "logs", "ps"])
+    service_parser.add_argument("action", choices=["start", "restart", "stop", "status", "logs", "ps", "refresh-plugins"])
     service_parser.add_argument("--host", default=None, help=f"service 监听地址，默认读取配置文件（当前 {config.service.host}）")
     service_parser.add_argument("--port", type=int, default=None, help=f"service 监听端口，默认读取配置文件（当前 {config.service.port}）")
     service_parser.add_argument("--lines", type=int, default=200, help="查看日志时输出的最后行数")
@@ -346,6 +346,14 @@ def _print_result(result: dict, json_output: bool = False) -> None:
         print(f"imported: count={result.get('item_count')} replace={result.get('replace')}")
         return
 
+    if "loaded" in result and "loaded_count" in result and "error_count" in result:
+        print(f"plugin refresh: loaded={result['loaded_count']} errors={result['error_count']}")
+        for item in result.get("loaded") or []:
+            print(f"- {item['package']} ({item['source']}) actions={item['action_count']} controls={item['control_count']}")
+        for item in result.get("errors") or []:
+            print(f"! {item.get('module') or item.get('package')}: {item.get('error')}")
+        return
+
     if "uploaded" in result:
         print(f"uploaded: {result['uploaded']}")
     if "resolved" in result:
@@ -453,6 +461,12 @@ def main() -> int:
                     _print_result(client.service_processes(), args.json)
                 except ServiceClientError:
                     _print_result(list_service_processes(workflow_service), args.json)
+                return 0
+            if args.action == "refresh-plugins":
+                try:
+                    _print_result(client.refresh_plugins(), args.json)
+                except ServiceClientError:
+                    _print_result(workflow_service.refresh_plugins(), args.json)
                 return 0
         except (RuntimeError, ServiceClientError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)

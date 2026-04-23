@@ -26,6 +26,7 @@ weboter/builtin/basic_action.py
 weboter/builtin/basic_control.py
 weboter/builtin/captcha_action.py
 weboter/core/bootstrap.py
+weboter/core/plugin_loader.py
 weboter/core/workflow_io.py
 weboter/core/engine/action_manager.py
 weboter/core/engine/control_manager.py

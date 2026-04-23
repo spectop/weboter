@@ -42,6 +42,12 @@ weboter service ps
 weboter service ps --json
 ```
 
+刷新插件注册（重新扫描 `PLUGIN_ROOT` 和已安装插件）：
+
+```bash
+weboter service refresh-plugins
+```
+
 管理 service 内部受管环境变量：
 
 ```bash
@@ -59,6 +65,11 @@ weboter env delete xxx.password
 `service stop` 现在会优先按 service 进程组发送 `SIGTERM`，等待优雅退出；如果超时未退出，再升级为 `SIGKILL`。这样在 Linux / WSL 下更容易把 service 派生出的 Playwright 浏览器进程一起回收，减少残留子进程。
 
 `service ps` 会列出当前 service 进程组内的进程，包括 `pid`、`ppid`、`pgid`、状态和命令行。排查 Playwright / 浏览器残留时，可以先看这里是否仍有 `kind=playwright` 或 `kind=browser` 的进程。
+
+`service refresh-plugins` 会重新加载插件能力。插件来源包含两类：
+
+- 目录插件：`paths.PLUGIN_ROOT`（或 `paths.plugin_root`）下每个子目录
+- 安装插件：`pip install weboter-xxx` 后可被刷新发现（优先 entry point `weboter.plugins`，其次 `weboter-*` 分发自动发现）
 
 `env` 命令管理的是 service 内部持久化环境变量，存储在 `.weboter/` 下，不依赖外部 shell 环境。变量名支持点号分组，例如 `xxx.username`、`xxx.password`。workflow 内可以直接通过 `$env{xxx.username}` 引用这些值。
 
@@ -208,6 +219,7 @@ service 默认暴露以下接口：
 - `GET /env` / `GET /env/tree` / `GET /env/export` / `POST /env/import` / `GET /env/{name}` / `POST /env` / `DELETE /env/{name}`：管理 service 内部受管环境变量
 - `GET /catalog/actions` / `GET /catalog/actions/{full_name}`：读取 action 摘要与单项参数契约
 - `GET /catalog/controls` / `GET /catalog/controls/{full_name}`：读取 control 摘要与单项参数契约
+- `POST /catalog/refresh`：刷新插件注册（重新扫描 `PLUGIN_ROOT` 与已安装插件）
 - `POST /workflow/upload`：上传并可选执行 workflow
 - `POST /workflow/dir`：列举、解析或执行目录中的 workflow
 - `GET /tasks` / `GET /tasks/{task_id}` / `GET /tasks/{task_id}/logs`：任务查看与日志读取
