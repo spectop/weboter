@@ -546,7 +546,7 @@ def main() -> int:
         local_task_manager = None
         client = WorkflowServiceClient()
         try:
-            WorkflowService, TaskManager, _, _, _, _ = _load_local_service_stack()
+            WorkflowService, TaskManager, *_ = _load_local_service_stack()
             workflow_service = WorkflowService()
             client = WorkflowServiceClient(workflow_service)
             local_task_manager = _build_local_task_manager(workflow_service, TaskManager)
@@ -735,7 +735,7 @@ def main() -> int:
     service = None
     client = WorkflowServiceClient()
     try:
-        WorkflowService, _, _, _, _, _ = _load_local_service_stack()
+        WorkflowService, *_ = _load_local_service_stack()
         service = WorkflowService()
         client = WorkflowServiceClient(service)
     except RuntimeError:

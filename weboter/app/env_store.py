@@ -59,7 +59,17 @@ class ManagedEnvStore:
 
     def tree(self, group: str | None = None) -> dict[str, Any]:
         data = self.load()
-        target = self._resolve_group(data, group) if group else data
+        if group:
+            try:
+                target = self._resolve_group(data, group)
+            except KeyError:
+                # 分组不存在，返回空树而不是报错
+                return {
+                    "group": group,
+                    "tree": {"name": group, "item_count": 0, "group_count": 0, "children": []},
+                }
+        else:
+            target = data
         return {
             "group": group,
             "tree": self._build_tree(group or "", target),

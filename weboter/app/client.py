@@ -328,6 +328,22 @@ class WorkflowServiceClient:
     def session_page_fill(self, session_id: str, locator: str, value: str, timeout: int = 5000) -> dict[str, Any]:
         return self._request("POST", f"/sessions/{session_id}/page/fill", {"locator": locator, "value": value, "timeout": timeout})
 
+    def delete_session(self, session_id: str) -> dict[str, Any]:
+        return self._request("DELETE", f"/sessions/{session_id}")
+
+    def cleanup_sessions(
+        self,
+        statuses: list[str] | None = None,
+        max_age_hours: float | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"limit": limit}
+        if statuses is not None:
+            payload["statuses"] = statuses
+        if max_age_hours is not None:
+            payload["max_age_hours"] = max_age_hours
+        return self._request("POST", "/sessions/cleanup", payload)
+
     def wait_for_task(self, task_id: str, timeout: float | None = None, interval: float = 0.5) -> dict[str, Any]:
         deadline = None if timeout is None or timeout <= 0 else time.time() + timeout
         while True:

@@ -321,6 +321,11 @@ class ExecutionSession:
             "page": page_info,
             "error": error,
         }
+        # 错误快照额外展示上一节点的 prev_outputs，方便取证
+        if phase == "error":
+            snapshot["prev_outputs"] = self._serialize_runtime_preview(
+                executor.runtime.data_context.data.get("prev_outputs", {})
+            )
 
         snapshot_path = self.manager.snapshot_root(self.record.session_id) / f"{snapshot_index:05d}_{phase}.json"
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
@@ -508,7 +513,16 @@ class ExecutionSession:
 
     async def _run_page_script(self, executor, code: str, arg: Any = None, timeout_ms: int = 5000) -> dict[str, Any]:
         page = self._require_page(executor)
-        compiled = self._compile_page_script(code)
+        try:
+            compiled = self._compile_page_script(code)
+        except ValueError as exc:
+            raise ValueError(
+                f"页面脚本编译失败: {exc}\n"
+                "脚本格式说明: 使用 Python 3 异步语法\n"
+                "可用内置: len str int float bool dict list tuple set min max sum range enumerate zip sorted any all abs\n"
+                "可用变量: page(当前页面), context(session_id task_id workflow runtime current_node_id arg)\n"
+                "举例: result = await page.title(); return {\"title\": result}"
+            ) from exc
         script_globals = {
             "__builtins__": self._safe_script_builtins(),
         }
@@ -606,18 +620,32 @@ class ExecutionSession:
 
     @classmethod
     def _compile_page_script(cls, code: str):
+        """编译页面脚本。脚本语言为 Python 3，必须定义异步函数。
+
+        合法举例::
+
+            result = await page.title()
+            return {"title": result}
+
+        可用内置: len str int float bool dict list tuple set min max sum range enumerate zip sorted any all abs
+        可用内置变量: page(当前页面), context(session_id task_id workflow runtime current_node_id arg)
+        不允许: import, global, nonlocal, 类定义, 双下划线名称
+        """
         source = code.strip()
         if not source:
             raise ValueError("页面脚本不能为空")
         try:
             tree = ast.parse(source, mode="exec")
         except SyntaxError as exc:
-            raise ValueError(f"页面脚本语法错误: {exc}") from exc
+            raise ValueError(f"页面脚本语法错误: {exc}\n示例: result = await page.title(); return {{\"title\": result}}") from exc
 
         forbidden_nodes = (ast.Import, ast.ImportFrom, ast.Global, ast.Nonlocal, ast.ClassDef)
         for node in ast.walk(tree):
             if isinstance(node, forbidden_nodes):
-                raise ValueError(f"页面脚本不允许使用 {type(node).__name__}")
+                raise ValueError(
+                    f"页面脚本不允许使用 {type(node).__name__}"
+                    "\n说明: 脚本运行在受限环境中，无法导入外部模块或定义类"
+                )
             if isinstance(node, ast.Name) and node.id.startswith("__"):
                 raise ValueError("页面脚本不允许访问双下划线名称")
             if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
@@ -1016,16 +1044,90 @@ class ExecutionSessionManager:
         return session.dispatch_command("run_temporary_node", payload)
 
     def export_workflow(self, session_id: str, path: str) -> dict[str, Any]:
-        session = self._require_live_session(session_id)
-        return session.dispatch_command("export_workflow", {"path": path})
+        live = self.get_live_session(session_id)
+        if live is not None:
+            return live.dispatch_command("export_workflow", {"path": path})
+        # 已终止 session: 从最新快照重建 workflow JSON 并写入目标路径
+        snap_data = self._workflow_from_snapshot(session_id)
+        workflow_dict = snap_data.get("workflow")
+        if not workflow_dict:
+            raise ValueError(f"No workflow data available to export for session: {session_id}")
+        output_path = Path(path).expanduser().resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        # 完整 workflow 数据来自快照的 workflow 字段（已完整序列化）
+        record = self.get_session(session_id)
+        snapshot_files = sorted(self.snapshot_root(record.session_id).glob("*.json"), reverse=True)
+        for snap_file in snapshot_files:
+            try:
+                snap = json.loads(snap_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if snap.get("workflow") is None:
+                continue
+            output_path.write_text(
+                json.dumps(snap["workflow"], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return {"saved": str(output_path), "source": "snapshot", "snapshot_index": snap.get("index")}
+        raise ValueError(f"No workflow data available to export for session: {session_id}")
 
     def get_workflow(self, session_id: str) -> dict[str, Any]:
-        session = self._require_live_session(session_id)
-        return session.describe_workflow()
+        live = self.get_live_session(session_id)
+        if live is not None:
+            return live.describe_workflow()
+        return self._workflow_from_snapshot(session_id)
 
     def get_workflow_node(self, session_id: str, node_id: str) -> dict[str, Any]:
-        session = self._require_live_session(session_id)
-        return session.describe_workflow_node(node_id)
+        live = self.get_live_session(session_id)
+        if live is not None:
+            return live.describe_workflow_node(node_id)
+        snapshot_wf = self._workflow_from_snapshot(session_id)
+        nodes = (snapshot_wf.get("workflow") or {}).get("nodes") or []
+        for node in nodes:
+            if node.get("node_id") == node_id:
+                return {
+                    "session_id": session_id,
+                    "task_id": snapshot_wf.get("task_id"),
+                    "node": node,
+                    "source": "snapshot",
+                }
+        raise FileNotFoundError(f"Workflow node not found: {node_id}")
+
+    def _workflow_from_snapshot(self, session_id: str) -> dict[str, Any]:
+        """从该 session 最新快照中读取 workflow 摘要，用于已终止 session 的 workflow 查询"""
+        record = self.get_session(session_id)
+        snapshot_files = sorted(self.snapshot_root(record.session_id).glob("*.json"), reverse=True)
+        if not snapshot_files:
+            raise ValueError(f"Session has no snapshots: {session_id}")
+        for snap_file in snapshot_files:
+            try:
+                snap = json.loads(snap_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            workflow = snap.get("workflow")
+            if workflow is None:
+                continue
+            nodes = workflow.get("nodes") or []
+            node_summaries = nodes[:20]
+            return {
+                "session_id": session_id,
+                "task_id": snap.get("task_id"),
+                "current_node_id": snap.get("current_node_id"),
+                "workflow": {
+                    "flow_id": workflow.get("flow_id"),
+                    "name": workflow.get("name"),
+                    "description": workflow.get("description"),
+                    "start_node_id": workflow.get("start_node_id"),
+                    "log": workflow.get("log"),
+                    "node_count": len(nodes),
+                    "nodes": node_summaries,
+                    "remaining_node_count": max(len(nodes) - len(node_summaries), 0),
+                    "available_detail_methods": ["session_workflow_node_detail(node_id)"],
+                },
+                "source": "snapshot",
+                "snapshot_index": snap.get("index"),
+            }
+        raise ValueError(f"No workflow data found in snapshots for session: {session_id}")
 
     def get_runtime_value(self, session_id: str, key: str) -> dict[str, Any]:
         session = self._require_live_session(session_id)
@@ -1086,6 +1188,93 @@ class ExecutionSessionManager:
         with self._lock:
             self._live_sessions.pop(session_id, None)
 
+    # --- 会话清理 ---
+
+    _TERMINAL_STATUSES = frozenset({SESSION_STATUS_SUCCEEDED, SESSION_STATUS_FAILED})
+
+    def delete_session(self, session_id: str) -> dict[str, Any]:
+        """删除一个已终止的 session（记录文件 + 快照目录）。
+        若 session 仍处于活动状态则拒绝操作。
+        """
+        record = self.get_session(session_id)
+        if record.status not in self._TERMINAL_STATUSES:
+            raise ValueError(
+                f"只能删除已终止的 session（{', '.join(sorted(self._TERMINAL_STATUSES))}），"
+                f"当前状态为 {record.status!r}"
+            )
+        with self._lock:
+            self._live_sessions.pop(record.session_id, None)
+        session_dir = self.session_root(record.session_id)
+        record_file = self._resolve_session_file(record.session_id)
+        snapshot_count = record.snapshot_count
+        import shutil
+        if session_dir.exists():
+            shutil.rmtree(session_dir, ignore_errors=True)
+        if record_file.exists():
+            record_file.unlink(missing_ok=True)
+        return {
+            "session_id": record.session_id,
+            "deleted": True,
+            "snapshot_count": snapshot_count,
+        }
+
+    def cleanup_sessions(
+        self,
+        statuses: list[str] | None = None,
+        max_age_hours: float | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """批量清理已终止的 session。
+        - statuses: 限定清理的状态（默认仅终止态：succeeded / failed）
+        - max_age_hours: 仅删除 updated_at 距今超过指定小时数的 session
+        - limit: 单次最多清理数量，避免误操作过大
+        """
+        import shutil
+        from datetime import datetime, timezone
+
+        allowed_statuses = set(statuses) if statuses else self._TERMINAL_STATUSES
+        # 只允许清理终止态，忽略请求中混入的活动态
+        allowed_statuses &= self._TERMINAL_STATUSES
+
+        session_files = sorted(self.root.glob("*.json"), key=lambda p: p.stat().st_mtime)
+        deleted = []
+        skipped = []
+        now = datetime.now(tz=timezone.utc)
+
+        for path in session_files:
+            if len(deleted) >= limit:
+                break
+            try:
+                record = self._load_record(path)
+            except Exception:
+                continue
+            if record.status not in allowed_statuses:
+                continue
+            if max_age_hours is not None:
+                try:
+                    updated = datetime.fromisoformat(record.updated_at)
+                    if updated.tzinfo is None:
+                        updated = updated.replace(tzinfo=timezone.utc)
+                    age_hours = (now - updated).total_seconds() / 3600
+                    if age_hours < max_age_hours:
+                        skipped.append(record.session_id)
+                        continue
+                except Exception:
+                    pass
+            with self._lock:
+                self._live_sessions.pop(record.session_id, None)
+            session_dir = self.session_root(record.session_id)
+            if session_dir.exists():
+                shutil.rmtree(session_dir, ignore_errors=True)
+            path.unlink(missing_ok=True)
+            deleted.append(record.session_id)
+
+        return {
+            "deleted_count": len(deleted),
+            "deleted": deleted,
+            "skipped_count": len(skipped),
+        }
+
     def session_root(self, session_id: str) -> Path:
         return self.root / session_id
 
@@ -1113,6 +1302,8 @@ class ExecutionSessionManager:
             sections.append("debug")
         if snapshot.get("error") is not None:
             sections.append("error")
+        if snapshot.get("prev_outputs") is not None:
+            sections.append("prev_outputs")
         return sections
 
     @classmethod
@@ -1182,6 +1373,7 @@ class ExecutionSessionManager:
             "page": snapshot.get("page"),
             "debug": snapshot.get("debug"),
             "error": snapshot.get("error"),
+            "prev_outputs": snapshot.get("prev_outputs"),
         }
         detail["sections"] = {name: section_map[name] for name in requested if name in section_map}
         return detail
@@ -1190,7 +1382,7 @@ class ExecutionSessionManager:
     def _normalize_snapshot_sections(sections: list[str] | None) -> list[str]:
         if not sections:
             return []
-        allowed = {"node", "runtime", "workflow", "page", "debug", "error"}
+        allowed = {"node", "runtime", "workflow", "page", "debug", "error", "prev_outputs"}
         normalized: list[str] = []
         for item in sections:
             name = item.strip().lower()

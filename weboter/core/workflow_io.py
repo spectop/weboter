@@ -59,31 +59,37 @@ class WorkflowReader:
 
 class WorkflowWriter:
     @staticmethod
-    def to_json(workflow: Flow, file_path: Path, indent: int = 2):
-        """将工作流数据写入JSON文件"""
-        data = {
-            "id": workflow.flow_id,
-            "name": workflow.name,
-            "description": workflow.description,
-            "start_node_id": workflow.start_node_id,
+    def _flow_to_dict(flow: Flow) -> dict:
+        """将 Flow 对象递归序列化为 JSON 兼容的字典"""
+        return {
+            "id": flow.flow_id,
+            "name": flow.name,
+            "description": flow.description,
+            "start_node_id": flow.start_node_id,
             "nodes": [
                 {
                     "id": node.node_id,
+                    "name": node.name,
+                    "description": node.description,
                     "action": node.action,
-                    "inputs": node.inputs,  # 使用'inputs'键保持兼容
-                    "outputs": [output.__dict__ for output in node.outputs],  # 使用'outputs'键保持兼容
+                    "inputs": node.inputs,
+                    "outputs": [output.__dict__ for output in node.outputs],
                     "control": node.control,
                     "params": node.params,
-                    "log": node.log
-                } for node in workflow.nodes
+                    "log": node.log,
+                }
+                for node in flow.nodes
             ],
             "sub_flows": [
-                {
-                    "file": str(sub_flow_file)
-                } for sub_flow_file in workflow.sub_flows
+                WorkflowWriter._flow_to_dict(sub_flow) for sub_flow in flow.sub_flows
             ],
-            "log": workflow.log
+            "log": flow.log,
         }
+
+    @staticmethod
+    def to_json(workflow: Flow, file_path: Path, indent: int = 2):
+        """将工作流数据写入JSON文件"""
+        data = WorkflowWriter._flow_to_dict(workflow)
 
         try:
             # 确保目录存在

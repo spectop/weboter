@@ -358,6 +358,8 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     def _raise_http_error(exc: Exception) -> None:
         if isinstance(exc, (FileNotFoundError, NotADirectoryError, ValueError)):
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if isinstance(exc, KeyError):
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.get("/health", tags=["service"])
@@ -471,7 +473,10 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
 
     @app.get("/tasks", tags=["task"])
     def list_tasks(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
-        return {"items": [asdict(task) for task in task_manager.list_tasks(limit)]}
+        return {
+            "items": [asdict(task) for task in task_manager.list_tasks(limit)],
+            "queue": task_manager.queue_status(),
+        }
 
     @app.get("/tasks/{task_id}", tags=["task"])
     def get_task(task_id: str) -> dict[str, Any]:
@@ -663,6 +668,24 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     def session_page_fill(session_id: str, payload: SessionPageFillRequest) -> dict[str, Any]:
         try:
             return session_manager.page_fill(session_id, payload.locator, payload.value, payload.timeout)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.delete("/sessions/{session_id}", tags=["session"])
+    def session_delete(session_id: str) -> dict[str, Any]:
+        try:
+            return session_manager.delete_session(session_id)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @app.post("/sessions/cleanup", tags=["session"])
+    def session_cleanup(payload: dict[str, Any] = {}) -> dict[str, Any]:
+        try:
+            return session_manager.cleanup_sessions(
+                statuses=payload.get("statuses"),
+                max_age_hours=payload.get("max_age_hours"),
+                limit=int(payload.get("limit") or 100),
+            )
         except Exception as exc:
             _raise_http_error(exc)
 

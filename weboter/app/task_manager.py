@@ -9,12 +9,13 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from weboter.app.session import ExecutionSessionManager
+from weboter.app.session import ExecutionSessionManager, SESSION_STATUS_GUARD_WAITING, SESSION_STATUS_PAUSED
 from weboter.app.service import WorkflowService
 
 
 TASK_STATUS_QUEUED = "queued"
 TASK_STATUS_RUNNING = "running"
+TASK_STATUS_GUARD_WAITING = "guard_waiting"
 TASK_STATUS_SUCCEEDED = "succeeded"
 TASK_STATUS_FAILED = "failed"
 TERMINAL_TASK_STATUSES = {TASK_STATUS_SUCCEEDED, TASK_STATUS_FAILED}
@@ -50,6 +51,10 @@ class TaskManager:
         self.task_root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="weboter-task")
+        self._max_workers = max_workers
+        self._queued_count = 0
+        self._running_count = 0
+        self._count_lock = threading.Lock()
 
     def submit(
         self,
@@ -81,6 +86,8 @@ class TaskManager:
             )
         self._save(record)
         self.system_logger.info("任务已创建: %s -> %s", task_id, workflow_path)
+        with self._count_lock:
+            self._queued_count += 1
         self._executor.submit(self._run_task, task_id)
         return record
 
@@ -91,7 +98,16 @@ class TaskManager:
 
     def get_task(self, task_id: str) -> TaskRecord:
         task_file = self._resolve_task_file(task_id)
-        return self._load_from_file(task_file)
+        record = self._load_from_file(task_file)
+        # 若任务仍在 running，从 session 同步更实时的子状态（guard_waiting / paused）
+        if record.status == TASK_STATUS_RUNNING and self.session_manager is not None:
+            try:
+                session_record = self.session_manager.get_session(record.session_id)
+                if session_record.status in {SESSION_STATUS_GUARD_WAITING, SESSION_STATUS_PAUSED}:
+                    record.status = session_record.status
+            except Exception:
+                pass
+        return record
 
     def read_task_log(self, task_id: str, lines: int = 200) -> dict[str, Any]:
         record = self.get_task(task_id)
@@ -114,6 +130,15 @@ class TaskManager:
                 raise TimeoutError(f"Wait task timeout: {task_id}")
             time.sleep(interval)
 
+    def queue_status(self) -> dict[str, Any]:
+        """返回当前任务队列状态：排队数、运行数、最大并行数"""
+        with self._count_lock:
+            return {
+                "queued": self._queued_count,
+                "running": self._running_count,
+                "max_workers": self._max_workers,
+            }
+
     def _run_task(self, task_id: str) -> None:
         record = self.get_task(task_id)
         logger = logging.getLogger(f"weboter.task.{task_id}")
@@ -124,6 +149,9 @@ class TaskManager:
         file_handler = logging.FileHandler(record.log_path, encoding="utf-8")
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
+        with self._count_lock:
+            self._queued_count = max(0, self._queued_count - 1)
+            self._running_count += 1
 
         try:
             record.status = TASK_STATUS_RUNNING
@@ -151,6 +179,8 @@ class TaskManager:
                 self.session_manager.mark_session_finished(task_id, False, str(exc))
             self.system_logger.exception("任务执行失败: %s", task_id)
         finally:
+            with self._count_lock:
+                self._running_count = max(0, self._running_count - 1)
             logger.removeHandler(file_handler)
             file_handler.close()
 

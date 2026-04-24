@@ -255,6 +255,8 @@ def _profile_tools(profile: str) -> set[str]:
             "session_export_workflow",
             "session_page_snapshot",
             "session_page_run_script",
+            "session_delete",
+            "session_cleanup",
         },
         "admin": {
             "service_status",
@@ -299,6 +301,8 @@ def _profile_tools(profile: str) -> set[str]:
             "session_export_workflow",
             "session_page_snapshot",
             "session_page_run_script",
+            "session_delete",
+            "session_cleanup",
         },
     }
     return tool_sets.get(profile, tool_sets["operator"])
@@ -660,6 +664,32 @@ def create_mcp_server() -> FastMCP:
         ) -> dict[str, Any]:
             """执行一段受控的 Playwright 页面脚本，返回脚本结果和最新页面快照。"""
             return client.run_session_page_script(session_id, code, arg, timeout_ms)
+
+    if "session_delete" in enabled_tools:
+        @server.tool()
+        def session_delete(session_id: str) -> dict[str, Any]:
+            """删除一个已终止的 session（记录文件和快照目录）。
+            只能删除 succeeded / failed 状态的 session，活动中的 session 会拒绝操作。
+            """
+            return client.delete_session(session_id)
+
+    if "session_cleanup" in enabled_tools:
+        @server.tool()
+        def session_cleanup(
+            statuses: list[str] | None = None,
+            max_age_hours: float | None = None,
+            limit: int = 100,
+        ) -> dict[str, Any]:
+            """批量清理已终止的 session，释放磁盘空间。
+            - statuses: 要清理的状态列表，默认 [succeeded, failed]（仅允许终止态）
+            - max_age_hours: 仅清理 updated_at 距今超过指定小时数的 session
+            - limit: 单次最多清理数量（默认 100）
+            """
+            return client.cleanup_sessions(
+                statuses=statuses,
+                max_age_hours=max_age_hours,
+                limit=limit,
+            )
 
     return server
 

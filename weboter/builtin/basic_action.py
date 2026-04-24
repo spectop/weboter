@@ -155,8 +155,14 @@ class ClickItem(ActionBase):
         InputFieldDeclaration(
             name="locator",
             description="The CSS locator of the item to click",
-            required=True,
+            required=False,
             accepted_types=["LocatorDefine"]
+        ),
+        InputFieldDeclaration(
+            name="locators",
+            description="候选 locator 列表（LocatorDefine 数组），按顺序逐一尝试，任一成功即停止。与 locator 字段互补，适合动态页面。",
+            required=False,
+            accepted_types=["LocatorDefine[]"]
         ),
         InputFieldDeclaration(
             name="timeout",
@@ -191,15 +197,15 @@ class ClickItem(ActionBase):
 
     async def execute(self, io: IOPipe):
         inputs = io.inputs
-        
+
         scope = inputs.get("scope", "page")
-        if "locator" not in inputs:
-            raise ValueError("Input 'locator' is required.")
+        if "locator" not in inputs and "locators" not in inputs:
+            raise ValueError("Input 'locator' or 'locators' is required.")
 
         timeout = inputs.get("timeout", 5000)
         if not isinstance(timeout, (int, float)):
             timeout = 5000
-        
+
         if scope == "page":
             page = io.page
             if not page:
@@ -207,21 +213,41 @@ class ClickItem(ActionBase):
             if not isinstance(page, pw.Page):
                 raise ValueError("Current page in context is not a valid Page object.")
             scope = page
-        else:
-            pass
-        
-        locator = LocatorDefine.deserialize(inputs["locator"])
-        element = utils.get_locator(scope, locator)
 
         no_error = inputs.get("no_error", False)
         force = inputs.get("force", False)
-        if no_error:
-            try:
+
+        # 构建候选 locator 列表：先从 locators，再从 locator
+        raw_locators: list = []
+        if inputs.get("locators"):
+            raw_locators.extend(inputs["locators"])
+        if inputs.get("locator") is not None:
+            raw_locators.append(inputs["locator"])
+
+        if len(raw_locators) == 1:
+            # 单候选直接执行，保持原有行为
+            element = utils.get_locator(scope, LocatorDefine.deserialize(raw_locators[0]))
+            if no_error:
+                try:
+                    await element.click(timeout=timeout, force=force)
+                except pw.TimeoutError:
+                    pass
+            else:
                 await element.click(timeout=timeout, force=force)
-            except pw.TimeoutError:
-                pass
         else:
-            await element.click(timeout=timeout, force=force)
+            # 多候选：逐一尝试，全部失败时按 no_error 决定是否抛出
+            per_timeout = max(1000, timeout // len(raw_locators))
+            last_error: Exception | None = None
+            for raw in raw_locators:
+                element = utils.get_locator(scope, LocatorDefine.deserialize(raw))
+                try:
+                    await element.click(timeout=per_timeout, force=force)
+                    last_error = None
+                    break
+                except pw.TimeoutError as exc:
+                    last_error = exc
+            if last_error is not None and not no_error:
+                raise last_error
 
 class FillInput(ActionBase):
     """Action to fill an input field on the web page given a locator."""
