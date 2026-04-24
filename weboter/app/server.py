@@ -3,24 +3,31 @@ from __future__ import annotations
 from dataclasses import asdict
 import logging
 import os
-import socket
 import signal
+import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse
 import uvicorn
 
 from weboter.app.client import ServiceClientError, WorkflowServiceClient
-from weboter.app.config import load_app_config
+from weboter.app.http_utils import raise_http_error
+from weboter.app.panel import PANEL_SESSION_COOKIE, PanelAuthManager
+from weboter.app.routers.catalog import register_catalog_routes
+from weboter.app.routers.env import register_env_routes
+from weboter.app.routers.panel import register_panel_routes
+from weboter.app.routers.service import register_service_routes
+from weboter.app.routers.sessions import register_session_routes
+from weboter.app.routers.tasks import register_task_routes
+from weboter.app.routers.workflows import register_workflow_routes
 from weboter.app.session import ExecutionSessionManager
 from weboter.app.service import WorkflowService
-from weboter.app.task_manager import TERMINAL_TASK_STATUSES, TaskManager
+from weboter.app.task_manager import TaskManager
 
 
 DEFAULT_SERVICE_HOST = "127.0.0.1"
@@ -61,13 +68,13 @@ def _read_process_stat(pid: int) -> dict[str, Any] | None:
     end_comm = content.rfind(")")
     if end_comm < 0:
         return None
-    prefix = content[:end_comm + 1]
-    suffix = content[end_comm + 2:].split()
+    prefix = content[: end_comm + 1]
+    suffix = content[end_comm + 2 :].split()
     if len(suffix) < 3:
         return None
     return {
         "pid": pid,
-        "comm": prefix[prefix.find("(") + 1:-1],
+        "comm": prefix[prefix.find("(") + 1 : -1],
         "state": suffix[0],
         "ppid": int(suffix[1]),
         "pgid": int(suffix[2]),
@@ -162,123 +169,19 @@ def _consume_secret_notice(workflow_service: WorkflowService) -> dict[str, str] 
     return secrets_summary
 
 
-class WorkflowUploadRequest(BaseModel):
-    path: str
-    execute: bool = False
-    pause_before_start: bool = False
-    breakpoints: List[Dict[str, Any]] = Field(default_factory=list)
-
-
-class WorkflowDirectoryRequest(BaseModel):
-    directory: str
-    name: str | None = None
-    list: bool = False
-    delete: bool = False
-    execute: bool = False
-    pause_before_start: bool = False
-    breakpoints: List[Dict[str, Any]] = Field(default_factory=list)
-
-
-class SessionSetContextRequest(BaseModel):
-    key: str
-    value: Any
-
-
-class SessionRuntimeValueRequest(BaseModel):
-    key: str
-
-
-class SessionJumpRequest(BaseModel):
-    node_id: str
-
-
-class SessionInterruptRequest(BaseModel):
-    reason: str = "interrupt_next"
-
-
-class SessionConfigureBreakpointsRequest(BaseModel):
-    breakpoints: list[dict[str, Any]]
-    replace: bool = True
-
-
-class SessionClearBreakpointsRequest(BaseModel):
-    breakpoint_ids: list[str] | None = None
-
-
-class SessionSnapshotDetailSectionsRequest(BaseModel):
-    sections: List[str] = Field(default_factory=list)
-
-
-class SessionPatchNodeRequest(BaseModel):
-    node_id: str
-    patch: dict[str, Any]
-
-
-class SessionAddNodeRequest(BaseModel):
-    node: dict[str, Any]
-
-
-class SessionRunNodeRequest(BaseModel):
-    node: dict[str, Any]
-    jump_to_node_id: str | None = None
-
-
-class SessionExportWorkflowRequest(BaseModel):
-    path: str
-
-
-class SessionPageEvaluateRequest(BaseModel):
-    script: str
-    arg: Any | None = None
-
-
-class SessionPageScriptRequest(BaseModel):
-    code: str
-    arg: Any | None = None
-    timeout_ms: int = 5000
-
-
-class SessionPageGotoRequest(BaseModel):
-    url: str
-
-
-class SessionPageClickRequest(BaseModel):
-    locator: str
-    timeout: int = 5000
-
-
-class SessionPageFillRequest(BaseModel):
-    locator: str
-    value: str
-    timeout: int = 5000
-
-
-class EnvSetRequest(BaseModel):
-    name: str
-    value: Any
-
-
-class EnvImportRequest(BaseModel):
-    data: dict[str, Any]
-    replace: bool = False
-
-
 def _configure_service_logger(workflow_service: WorkflowService) -> logging.Logger:
     logger = logging.getLogger("weboter.service")
     logger.setLevel(logging.INFO)
     logger.propagate = False
-    if not any(isinstance(handler, logging.FileHandler) and getattr(handler, "baseFilename", None) == str(workflow_service.service_log_path) for handler in logger.handlers):
+    if not any(
+        isinstance(handler, logging.FileHandler)
+        and getattr(handler, "baseFilename", None) == str(workflow_service.service_log_path)
+        for handler in logger.handlers
+    ):
         handler = logging.FileHandler(workflow_service.service_log_path, encoding="utf-8")
         handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
         logger.addHandler(handler)
     return logger
-
-
-def _tail_file(path: Path, lines: int) -> str:
-    if not path.is_file():
-        return ""
-    content = path.read_text(encoding="utf-8")
-    return "\n".join(content.splitlines()[-lines:])
 
 
 def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
@@ -286,16 +189,21 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
     system_logger = _configure_service_logger(service)
     session_manager = ExecutionSessionManager(service.data_root / "sessions", system_logger)
     task_manager = TaskManager(service, system_logger, session_manager=session_manager)
+    panel_auth = PanelAuthManager(service.data_root)
+    # 启动时确保存在单用户账号（默认 admin/admin，可通过 CLI 重置）。
+    panel_auth.summary()
     api_token = service.get_api_token() or ""
+
     app = FastAPI(
         title="Weboter Local Service",
-        version="0.1.17",
+        version="0.1.20",
         summary="Weboter 本地 workflow 执行服务",
     )
     app.state.workflow_service = service
     app.state.system_logger = system_logger
     app.state.task_manager = task_manager
     app.state.session_manager = session_manager
+    app.state.panel_auth = panel_auth
 
     def _request_source(request: Request) -> str:
         caller = request.headers.get("X-Weboter-Caller", "").strip()
@@ -313,12 +221,27 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
 
         path = request.url.path
         public_paths = {"/health", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
-        if path in public_paths or path.startswith("/docs"):
+        if path in public_paths or path.startswith("/docs") or path == "/panel" or path.startswith("/panel/"):
             return await call_next(request)
 
         provided = request.headers.get("X-Weboter-Token", "")
         if provided != api_token:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def panel_session_middleware(request: Request, call_next):
+        path = request.url.path
+        if not path.startswith("/panel/api"):
+            return await call_next(request)
+        if path in {"/panel/api/login", "/panel/api/status"}:
+            return await call_next(request)
+
+        token = request.cookies.get(PANEL_SESSION_COOKIE, "")
+        username = panel_auth.resolve_session(token)
+        if not username:
+            return JSONResponse({"error": "panel unauthorized"}, status_code=401)
+        request.state.panel_user = username
         return await call_next(request)
 
     @app.middleware("http")
@@ -355,398 +278,31 @@ def create_app(workflow_service: WorkflowService | None = None) -> FastAPI:
         )
         return response
 
-    def _raise_http_error(exc: Exception) -> None:
-        if isinstance(exc, (FileNotFoundError, NotADirectoryError, ValueError)):
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if isinstance(exc, KeyError):
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    @app.get("/health", tags=["service"])
-    def health() -> dict[str, Any]:
-        state = service.read_service_state()
-        return {
-            "status": "ok",
-            "pid": os.getpid(),
-            "workspace_root": str(service.workspace_root),
-            "service": asdict(state) if state else None,
-        }
-
-    @app.get("/service/state", tags=["service"])
-    def service_state() -> dict[str, Any]:
-        state = service.read_service_state()
-        if state is None:
-            raise HTTPException(status_code=503, detail="service 状态不可用")
-        return asdict(state)
-
-    @app.get("/service/logs", tags=["service"])
-    def service_logs(lines: int = Query(default=200, ge=1, le=2000)) -> dict[str, Any]:
-        return {
-            "log_path": str(service.service_log_path),
-            "content": _tail_file(service.service_log_path, lines),
-        }
-
-    @app.get("/service/processes", tags=["service"])
-    def service_processes() -> dict[str, Any]:
-        try:
-            return list_service_processes(service)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/env", tags=["env"])
-    def list_env(group: str | None = Query(default=None)) -> dict[str, Any]:
-        try:
-            return service.list_env(group)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/env/tree", tags=["env"])
-    def env_tree(group: str | None = Query(default=None)) -> dict[str, Any]:
-        try:
-            return service.env_tree(group)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/env/{name:path}", tags=["env"])
-    def get_env(name: str, reveal: bool = Query(default=False)) -> dict[str, Any]:
-        try:
-            return service.get_env(name, reveal=reveal)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/env", tags=["env"])
-    def set_env(payload: EnvSetRequest) -> dict[str, Any]:
-        try:
-            return service.set_env(payload.name, payload.value)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.delete("/env/{name:path}", tags=["env"])
-    def delete_env(name: str) -> dict[str, Any]:
-        try:
-            return service.delete_env(name)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/env/import", tags=["env"])
-    def import_env(payload: EnvImportRequest) -> dict[str, Any]:
-        try:
-            return service.import_env(payload.data, replace=payload.replace)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/env/export", tags=["env"])
-    def export_env(group: str | None = Query(default=None), reveal: bool = Query(default=False)) -> dict[str, Any]:
-        try:
-            return service.export_env(group, reveal=reveal)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/catalog/actions", tags=["catalog"])
-    def list_actions() -> dict[str, Any]:
-        return service.list_actions()
-
-    @app.get("/catalog/actions/{full_name:path}", tags=["catalog"])
-    def get_action(full_name: str) -> dict[str, Any]:
-        item = service.get_action(full_name)
-        if item is None:
-            raise HTTPException(status_code=404, detail=f"action not found: {full_name}")
-        return item
-
-    @app.get("/catalog/controls", tags=["catalog"])
-    def list_controls() -> dict[str, Any]:
-        return service.list_controls()
-
-    @app.get("/catalog/controls/{full_name:path}", tags=["catalog"])
-    def get_control(full_name: str) -> dict[str, Any]:
-        item = service.get_control(full_name)
-        if item is None:
-            raise HTTPException(status_code=404, detail=f"control not found: {full_name}")
-        return item
-
-    @app.post("/catalog/refresh", tags=["catalog"])
-    def refresh_catalog() -> dict[str, Any]:
-        try:
-            return service.refresh_plugins()
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/tasks", tags=["task"])
-    def list_tasks(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
-        return {
-            "items": [asdict(task) for task in task_manager.list_tasks(limit)],
-            "queue": task_manager.queue_status(),
-        }
-
-    @app.get("/tasks/{task_id}", tags=["task"])
-    def get_task(task_id: str) -> dict[str, Any]:
-        try:
-            return asdict(task_manager.get_task(task_id))
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/tasks/{task_id}/logs", tags=["task"])
-    def get_task_logs(task_id: str, lines: int = Query(default=200, ge=1, le=2000)) -> dict[str, Any]:
-        try:
-            return task_manager.read_task_log(task_id, lines)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/sessions", tags=["session"])
-    def list_sessions(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
-        return {"items": [asdict(item) for item in session_manager.list_sessions(limit)]}
-
-    @app.get("/sessions/{session_id}", tags=["session"])
-    def get_session(session_id: str) -> dict[str, Any]:
-        try:
-            return asdict(session_manager.get_session(session_id))
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/sessions/{session_id}/snapshots", tags=["session"])
-    def get_session_snapshots(session_id: str, limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
-        try:
-            return {"items": session_manager.get_snapshots(session_id, limit)}
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/sessions/{session_id}/snapshots/{snapshot_index}", tags=["session"])
-    def get_session_snapshot_detail(
-        session_id: str,
-        snapshot_index: int,
-        sections: str | None = Query(default=None),
-    ) -> dict[str, Any]:
-        try:
-            requested_sections = []
-            if sections:
-                requested_sections = [item for item in sections.split(",") if item.strip()]
-            return session_manager.get_snapshot_detail(session_id, snapshot_index, requested_sections)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/pause", tags=["session"])
-    def pause_session(session_id: str) -> dict[str, Any]:
-        try:
-            return session_manager.request_pause(session_id)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/interrupt", tags=["session"])
-    def interrupt_session(session_id: str, payload: SessionInterruptRequest) -> dict[str, Any]:
-        try:
-            return session_manager.request_interrupt(session_id, payload.reason)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/resume", tags=["session"])
-    def resume_session(session_id: str) -> dict[str, Any]:
-        try:
-            return session_manager.resume(session_id)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/abort", tags=["session"])
-    def abort_session(session_id: str) -> dict[str, Any]:
-        try:
-            return session_manager.abort(session_id)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/context", tags=["session"])
-    def session_set_context(session_id: str, payload: SessionSetContextRequest) -> dict[str, Any]:
-        try:
-            return session_manager.set_context(session_id, payload.key, payload.value)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/jump", tags=["session"])
-    def session_jump(session_id: str, payload: SessionJumpRequest) -> dict[str, Any]:
-        try:
-            return session_manager.jump_to_node(session_id, payload.node_id)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/patch-node", tags=["session"])
-    def session_patch_node(session_id: str, payload: SessionPatchNodeRequest) -> dict[str, Any]:
-        try:
-            return session_manager.patch_node(session_id, payload.node_id, payload.patch)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/add-node", tags=["session"])
-    def session_add_node(session_id: str, payload: SessionAddNodeRequest) -> dict[str, Any]:
-        try:
-            return session_manager.add_node(session_id, payload.node)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/run-node", tags=["session"])
-    def session_run_node(session_id: str, payload: SessionRunNodeRequest) -> dict[str, Any]:
-        try:
-            return session_manager.run_temporary_node(session_id, payload.node, jump_to_node_id=payload.jump_to_node_id)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/sessions/{session_id}/workflow", tags=["session"])
-    def session_workflow(session_id: str) -> dict[str, Any]:
-        try:
-            return session_manager.get_workflow(session_id)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/sessions/{session_id}/workflow/node/{node_id}", tags=["session"])
-    def session_workflow_node(session_id: str, node_id: str) -> dict[str, Any]:
-        try:
-            return session_manager.get_workflow_node(session_id, node_id)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/sessions/{session_id}/runtime", tags=["session"])
-    def session_runtime_value(session_id: str, key: str = Query(...)) -> dict[str, Any]:
-        try:
-            return session_manager.get_runtime_value(session_id, key)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/breakpoints", tags=["session"])
-    def session_breakpoints(session_id: str, payload: SessionConfigureBreakpointsRequest) -> dict[str, Any]:
-        try:
-            return session_manager.configure_breakpoints(session_id, payload.breakpoints, replace=payload.replace)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/breakpoints/clear", tags=["session"])
-    def session_clear_breakpoints(session_id: str, payload: SessionClearBreakpointsRequest) -> dict[str, Any]:
-        try:
-            return session_manager.clear_breakpoints(session_id, payload.breakpoint_ids)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/export-workflow", tags=["session"])
-    def session_export_workflow(session_id: str, payload: SessionExportWorkflowRequest) -> dict[str, Any]:
-        try:
-            return session_manager.export_workflow(session_id, payload.path)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.get("/sessions/{session_id}/page", tags=["session"])
-    def session_page_snapshot(session_id: str) -> dict[str, Any]:
-        try:
-            return session_manager.page_snapshot(session_id)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/page/evaluate", tags=["session"])
-    def session_page_evaluate(session_id: str, payload: SessionPageEvaluateRequest) -> Any:
-        try:
-            return {"result": session_manager.page_evaluate(session_id, payload.script, payload.arg)}
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/page/script", tags=["session"])
-    def session_page_script(session_id: str, payload: SessionPageScriptRequest) -> dict[str, Any]:
-        try:
-            return session_manager.page_run_script(session_id, payload.code, payload.arg, payload.timeout_ms)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/page/goto", tags=["session"])
-    def session_page_goto(session_id: str, payload: SessionPageGotoRequest) -> dict[str, Any]:
-        try:
-            return session_manager.page_goto(session_id, payload.url)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/page/click", tags=["session"])
-    def session_page_click(session_id: str, payload: SessionPageClickRequest) -> dict[str, Any]:
-        try:
-            return session_manager.page_click(session_id, payload.locator, payload.timeout)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/{session_id}/page/fill", tags=["session"])
-    def session_page_fill(session_id: str, payload: SessionPageFillRequest) -> dict[str, Any]:
-        try:
-            return session_manager.page_fill(session_id, payload.locator, payload.value, payload.timeout)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.delete("/sessions/{session_id}", tags=["session"])
-    def session_delete(session_id: str) -> dict[str, Any]:
-        try:
-            return session_manager.delete_session(session_id)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/sessions/cleanup", tags=["session"])
-    def session_cleanup(payload: dict[str, Any] = {}) -> dict[str, Any]:
-        try:
-            return session_manager.cleanup_sessions(
-                statuses=payload.get("statuses"),
-                max_age_hours=payload.get("max_age_hours"),
-                limit=int(payload.get("limit") or 100),
-            )
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/workflow/upload", tags=["workflow"])
-    def workflow_upload(payload: WorkflowUploadRequest) -> dict[str, Any]:
-        try:
-            system_logger.info(
-                "workflow upload path=%s execute=%s pause_before_start=%s breakpoints=%s",
-                payload.path,
-                payload.execute,
-                payload.pause_before_start,
-                len(payload.breakpoints),
-            )
-            if not payload.execute:
-                return service.handle_upload_request(Path(payload.path), False)
-            resolution = service.upload_workflow(Path(payload.path))
-            task = task_manager.submit(
-                resolution.source_path,
-                trigger="upload",
-                pause_before_start=payload.pause_before_start,
-                breakpoints=payload.breakpoints,
-            )
-            return {
-                "uploaded": str(resolution.managed_path or resolution.source_path),
-                "task": asdict(task),
-            }
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @app.post("/workflow/dir", tags=["workflow"])
-    def workflow_dir(payload: WorkflowDirectoryRequest) -> dict[str, Any]:
-        try:
-            system_logger.info(
-                "workflow dir directory=%s name=%s list=%s delete=%s execute=%s pause_before_start=%s breakpoints=%s",
-                payload.directory,
-                payload.name,
-                payload.list,
-                payload.delete,
-                payload.execute,
-                payload.pause_before_start,
-                len(payload.breakpoints),
-            )
-            if payload.list:
-                return service.handle_directory_request(Path(payload.directory), payload.name, True, False, False)
-            if payload.delete:
-                return service.handle_directory_request(Path(payload.directory), payload.name, False, True, False)
-            if not payload.execute:
-                return service.handle_directory_request(Path(payload.directory), payload.name, False, False, False)
-            resolution = service.resolve_from_directory(Path(payload.directory), payload.name)
-            task = task_manager.submit(
-                resolution.source_path,
-                trigger="directory",
-                pause_before_start=payload.pause_before_start,
-                breakpoints=payload.breakpoints,
-            )
-            return {
-                "resolved": str(resolution.source_path),
-                "task": asdict(task),
-            }
-        except Exception as exc:
-            _raise_http_error(exc)
+    register_panel_routes(
+        app,
+        service=service,
+        task_manager=task_manager,
+        session_manager=session_manager,
+        panel_auth=panel_auth,
+        raise_http_error=raise_http_error,
+    )
+    register_service_routes(
+        app,
+        service=service,
+        list_service_processes=list_service_processes,
+        raise_http_error=raise_http_error,
+    )
+    register_env_routes(app, service=service, raise_http_error=raise_http_error)
+    register_catalog_routes(app, service=service, raise_http_error=raise_http_error)
+    register_task_routes(app, task_manager=task_manager, raise_http_error=raise_http_error)
+    register_session_routes(app, session_manager=session_manager, raise_http_error=raise_http_error)
+    register_workflow_routes(
+        app,
+        service=service,
+        task_manager=task_manager,
+        system_logger=system_logger,
+        raise_http_error=raise_http_error,
+    )
 
     return app
 

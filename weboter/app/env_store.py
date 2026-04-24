@@ -14,7 +14,9 @@ class ManagedEnvStore:
             return {}
         with open(self.path, "r", encoding="utf-8") as file_obj:
             payload = json.load(file_obj)
-        return payload if isinstance(payload, dict) else {}
+        if not isinstance(payload, dict):
+            return {}
+        return self._normalize_mapping(payload)
 
     def list_items(self, group: str | None = None) -> dict[str, Any]:
         data = self.load()
@@ -35,17 +37,16 @@ class ManagedEnvStore:
             "name": name,
             "value": value if reveal else self._mask_value(value),
             "masked": not reveal,
-            "value_type": self._value_type(value),
         }
 
     def set(self, name: str, value: Any) -> dict[str, Any]:
         data = self.load()
-        self._assign_name(data, name, value)
+        normalized = self._normalize_leaf_value(value)
+        self._assign_name(data, name, normalized)
         self._save(data)
         return {
             "saved": name,
-            "value_type": self._value_type(value),
-            "masked_value": self._mask_value(value),
+            "masked_value": self._mask_value(normalized),
         }
 
     def delete(self, name: str) -> dict[str, Any]:
@@ -196,7 +197,7 @@ class ManagedEnvStore:
                     raise ValueError(f"环境变量分组路径冲突: {key}")
                 self._merge_dict(existing, value)
                 continue
-            target[key] = value
+            target[key] = self._normalize_leaf_value(value)
 
     def _clone_data(self, data: dict[str, Any]) -> dict[str, Any]:
         copied: dict[str, Any] = {}
@@ -206,6 +207,15 @@ class ManagedEnvStore:
             else:
                 copied[key] = value
         return copied
+
+    def _normalize_mapping(self, data: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        for key, value in data.items():
+            if isinstance(value, dict):
+                normalized[key] = self._normalize_mapping(value)
+            else:
+                normalized[key] = self._normalize_leaf_value(value)
+        return normalized
 
     def _mask_mapping(self, data: dict[str, Any]) -> dict[str, Any]:
         masked: dict[str, Any] = {}
@@ -230,43 +240,21 @@ class ManagedEnvStore:
         return {
             "name": item["name"],
             "group": item["name"].rsplit(".", 1)[0] if "." in item["name"] else "",
-            "value_type": self._value_type(value),
             "masked_value": self._mask_value(value),
         }
 
     def _mask_value(self, value: Any) -> Any:
-        if value is None:
-            return None
-        if isinstance(value, str):
-            if not value:
-                return ""
-            if len(value) <= 4:
-                return "*" * len(value)
-            return f"{value[:2]}***{value[-2:]}"
-        if isinstance(value, (int, float, bool)):
-            return "***"
-        if isinstance(value, list):
-            return f"[list:{len(value)}]"
-        if isinstance(value, dict):
-            return f"{{dict:{len(value)}}}"
-        return "***"
+        text = self._normalize_leaf_value(value)
+        if not text:
+            return ""
+        if len(text) <= 4:
+            return "*" * len(text)
+        return f"{text[:2]}***{text[-2:]}"
 
-    def _value_type(self, value: Any) -> str:
-        if value is None:
-            return "null"
-        if isinstance(value, bool):
-            return "bool"
-        if isinstance(value, int):
-            return "int"
-        if isinstance(value, float):
-            return "float"
+    def _normalize_leaf_value(self, value: Any) -> str:
         if isinstance(value, str):
-            return "str"
-        if isinstance(value, list):
-            return "list"
-        if isinstance(value, dict):
-            return "dict"
-        return type(value).__name__
+            return value
+        return json.dumps(value, ensure_ascii=False)
 
     def _split_name(self, name: str) -> list[str]:
         parts = [item.strip() for item in name.split(".") if item.strip()]

@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: weboter
-Version: 0.1.18
+Version: 0.1.27
 Summary: Config-driven browser workflow automation
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown

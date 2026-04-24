@@ -1,5 +1,6 @@
 import argparse
 from dataclasses import asdict
+import getpass
 import json
 import logging
 import os
@@ -9,6 +10,7 @@ import sys
 
 from weboter.app.client import ServiceClientError, WorkflowServiceClient
 from weboter.app.config import load_app_config
+from weboter.app.panel import PanelAuthManager
 
 
 DEFAULT_SERVICE_HOST = "127.0.0.1"
@@ -239,6 +241,25 @@ def build_parser() -> argparse.ArgumentParser:
     session_parser.add_argument("--timeout-ms", type=int, default=5000, help="页面脚本超时，单位毫秒")
     session_parser.add_argument("--json", action="store_true", help="以 JSON 输出会话结果")
 
+    panel_parser = subparsers.add_parser(
+        "panel",
+        help="管理 Web 面板单用户账号",
+        description="管理 Web 面板登录账号。当前采用单用户模式，可通过 CLI 重置用户名和密码。",
+        epilog=textwrap.dedent(
+            """
+            示例:
+              weboter panel status
+              weboter panel reset-auth --username admin --password 'new-pass'
+              weboter panel reset-auth --username admin
+            """
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    panel_parser.add_argument("action", choices=["status", "reset-auth"])
+    panel_parser.add_argument("--username", help="reset-auth 时的新用户名")
+    panel_parser.add_argument("--password", help="reset-auth 时的新密码；不传则交互输入")
+    panel_parser.add_argument("--json", action="store_true", help="以 JSON 输出面板结果")
+
     return parser
 
 
@@ -323,7 +344,7 @@ def _print_result(result: dict, json_output: bool = False) -> None:
             for group in groups:
                 print(f"- {group['name']} ({group['item_count']})")
         for item in result["items"]:
-            print(f"{item['name']}  type={item.get('value_type')}  value={item.get('masked_value')}")
+            print(f"{item['name']}  value={item.get('masked_value')}")
         return
     if "groups" in result and result.get("groups") and not result.get("items"):
         print("groups:")
@@ -333,8 +354,8 @@ def _print_result(result: dict, json_output: bool = False) -> None:
     if "tree" in result and isinstance(result["tree"], dict):
         _print_env_tree(result["tree"])
         return
-    if "name" in result and "value_type" in result and "value" in result:
-        print(f"{result['name']}  type={result.get('value_type')}  value={result.get('value')}")
+    if "name" in result and "value" in result:
+        print(f"{result['name']}  value={result.get('value')}")
         return
     if "saved_path" in result:
         print(f"saved: {result['saved_path']}")
@@ -344,6 +365,12 @@ def _print_result(result: dict, json_output: bool = False) -> None:
         return
     if "imported" in result:
         print(f"imported: count={result.get('item_count')} replace={result.get('replace')}")
+        return
+    if "panel_user" in result:
+        print(f"panel user: {result['panel_user']} (updated_at={result.get('updated_at')})")
+        return
+    if "username" in result and "needs_reset" in result:
+        print(f"panel status: username={result['username']} needs_reset={result['needs_reset']}")
         return
 
     if "loaded" in result and "loaded_count" in result and "error_count" in result:
@@ -416,6 +443,42 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     config = load_app_config()
+
+    if args.command == "panel":
+        try:
+            from weboter.app.service import WorkflowService
+        except ImportError as exc:
+            print(f"error: 无法加载 service 依赖: {exc}", file=sys.stderr)
+            return 2
+        service = WorkflowService()
+        auth = PanelAuthManager(service.data_root)
+        try:
+            if args.action == "status":
+                _print_result(auth.summary(), args.json)
+                return 0
+            if args.action == "reset-auth":
+                username = (args.username or "").strip()
+                if not username:
+                    parser.error("panel reset-auth 需要 --username")
+                password = args.password
+                if password is None:
+                    first = getpass.getpass("输入新密码: ")
+                    second = getpass.getpass("再次输入新密码: ")
+                    if first != second:
+                        raise ValueError("两次输入的密码不一致")
+                    password = first
+                record = auth.reset_credentials(username, password, needs_reset=False)
+                _print_result(
+                    {
+                        "panel_user": record.username,
+                        "updated_at": record.updated_at,
+                    },
+                    args.json,
+                )
+                return 0
+        except (ValueError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
 
     if args.command == "service":
         try:
