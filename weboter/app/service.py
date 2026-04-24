@@ -3,14 +3,16 @@ from dataclasses import asdict, dataclass
 import json
 import logging
 from pathlib import Path
+from pathlib import PurePosixPath
 import shutil
 import secrets
 from typing import Any
+from zipfile import ZipFile
 
 from weboter.app.config import AppConfig, load_app_config
 from weboter.app.env_store import ManagedEnvStore
 from weboter.app.state import ServiceState, default_workspace_root
-from weboter.core.plugin_loader import ensure_plugins_initialized, refresh_plugins
+from weboter.core.plugin_loader import ensure_plugins_initialized, get_plugin_snapshot, refresh_plugins
 from weboter.core.engine.action_manager import action_manager
 from weboter.core.engine.control_manager import control_manager
 from weboter.core.engine.excutor import Executor
@@ -219,8 +221,104 @@ class WorkflowService:
             return None
         return {"control": item}
 
+    def list_plugins(self) -> dict[str, Any]:
+        ensure_plugins_initialized(self.config)
+        snapshot = get_plugin_snapshot(self.config)
+        source_map = {
+            item["package"]: {
+                "source": item.get("source") or "",
+                "module": item.get("module") or "",
+            }
+            for item in snapshot.get("loaded") or []
+            if item.get("package")
+        }
+
+        plugins: dict[str, dict[str, Any]] = {}
+        for action in action_manager.list_actions():
+            plugin = plugins.setdefault(
+                action["package"],
+                self._make_plugin_summary(action["package"], source_map.get(action["package"])),
+            )
+            plugin["actions"].append(action)
+        for control in control_manager.list_controls():
+            plugin = plugins.setdefault(
+                control["package"],
+                self._make_plugin_summary(control["package"], source_map.get(control["package"])),
+            )
+            plugin["controls"].append(control)
+
+        items = []
+        for package_name, plugin in sorted(plugins.items()):
+            plugin["action_count"] = len(plugin["actions"])
+            plugin["control_count"] = len(plugin["controls"])
+            plugin["description"] = self._plugin_description(plugin)
+            items.append(plugin)
+
+        return {
+            "plugin_root": snapshot.get("plugin_root") or str(self.config.plugin_root_path()),
+            "items": items,
+            "loaded": snapshot.get("loaded") or [],
+            "errors": snapshot.get("errors") or [],
+        }
+
     def refresh_plugins(self) -> dict[str, Any]:
         return refresh_plugins(self.config)
+
+    def install_plugin_archive(self, source: Path, replace: bool = True) -> dict[str, Any]:
+        source_path = source.expanduser().resolve()
+        if not source_path.is_file():
+            raise FileNotFoundError(f"Plugin archive not found: {source_path}")
+        if source_path.suffix.lower() != ".zip":
+            raise ValueError("插件上传目前仅支持 .zip 压缩包")
+
+        plugin_root = self.config.plugin_root_path()
+        plugin_root.mkdir(parents=True, exist_ok=True)
+
+        with ZipFile(source_path) as archive:
+            members = [name for name in archive.namelist() if name and not name.endswith("/")]
+            if not members:
+                raise ValueError("插件压缩包为空")
+
+            top_levels = {PurePosixPath(name).parts[0] for name in members if PurePosixPath(name).parts}
+            has_root_init = any(PurePosixPath(name).name == "__init__.py" and len(PurePosixPath(name).parts) == 1 for name in members)
+            if len(top_levels) == 1 and not has_root_init:
+                archive_root = next(iter(top_levels))
+                init_name = f"{archive_root}/__init__.py"
+                if init_name not in members:
+                    raise ValueError("插件压缩包必须包含顶层插件目录及 __init__.py")
+                target_dir = plugin_root / archive_root
+                strip_parts = 1
+            else:
+                if "__init__.py" not in members:
+                    raise ValueError("插件压缩包必须在根目录包含 __init__.py，或提供单个顶层插件目录")
+                target_dir = plugin_root / source_path.stem
+                strip_parts = 0
+
+            if target_dir.exists():
+                if not replace:
+                    raise FileExistsError(f"插件目录已存在: {target_dir.name}")
+                shutil.rmtree(target_dir)
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            for member in members:
+                pure_path = PurePosixPath(member)
+                parts = pure_path.parts[strip_parts:]
+                if not parts:
+                    continue
+                relative_path = Path(*parts)
+                destination = (target_dir / relative_path).resolve()
+                if target_dir.resolve() not in destination.parents and destination != target_dir.resolve():
+                    raise ValueError("插件压缩包包含非法路径")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member) as src, open(destination, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+
+        refresh_result = self.refresh_plugins()
+        return {
+            "uploaded": str(target_dir),
+            "plugin_root": str(plugin_root),
+            "refresh": refresh_result,
+        }
 
     def _summarize_contract_item(self, item: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -232,6 +330,31 @@ class WorkflowService:
             "input_count": len(item.get("inputs", [])),
             "output_count": len(item.get("outputs", [])),
         }
+
+    def _make_plugin_summary(self, package_name: str, source_info: dict[str, Any] | None) -> dict[str, Any]:
+        source_info = source_info or {}
+        source = source_info.get("source") or ("builtin" if package_name == "builtin" else "unknown")
+        return {
+            "package": package_name,
+            "source": source,
+            "module": source_info.get("module") or ("weboter.builtin" if package_name == "builtin" else ""),
+            "description": "",
+            "actions": [],
+            "controls": [],
+            "action_count": 0,
+            "control_count": 0,
+        }
+
+    def _plugin_description(self, plugin: dict[str, Any]) -> str:
+        for item in plugin.get("actions") or []:
+            description = (item.get("description") or "").strip()
+            if description:
+                return description
+        for item in plugin.get("controls") or []:
+            description = (item.get("description") or "").strip()
+            if description:
+                return description
+        return ""
 
     def handle_upload_request(self, source: Path, execute: bool = False) -> dict[str, Any]:
         resolution = self.upload_workflow(source)

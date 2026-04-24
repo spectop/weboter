@@ -261,22 +261,54 @@
     .actions { display: flex; gap: 8px; }
 
     .workspace-body {
+      height: 100%;
       min-height: 0;
       overflow-y: auto;
-      display: grid;
+      display: flex;
+      flex-direction: column;
       gap: 12px;
-      align-content: start;
       padding-right: 2px;
     }
 
     .section { display: none; padding: 14px; min-height: 0; }
-    .section.active { display: block; animation: fade-in .2s ease-out; }
+    .section.active { display: flex; flex-direction: column; animation: fade-in .2s ease-out; flex: 1; min-height: 0; }
+
+    /* 工作区标准范式：panel + workarea 独立滚动，填满整个高度 */
+    .section.with-workspace {
+      display: flex !important;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+      padding: 0;
+      flex: 1;
+    }
+
+    .section.with-workspace .ops-layout,
+    .section.with-workspace .plugin-layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 10px;
+      height: 100%;
+      min-height: 0;
+      overflow: visible;
+    }
 
     #tasks.section.active {
       display: flex;
       flex-direction: column;
-      min-height: calc(100vh - 170px);
+      min-height: 0;
       overflow: hidden;
+      padding: 0;
+      flex: 1;
+    }
+
+    #plugins.section.active {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+      padding: 0;
+      flex: 1;
     }
 
     @keyframes fade-in {
@@ -403,11 +435,46 @@
 
     .hint { margin-top: 8px; font-size: .84rem; color: var(--warn); min-height: 18px; }
 
+    button#pluginUploadBtn {
+      padding: 6px 8px;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      border: 1px solid #b3d9ff;
+      background: #e6f4ff;
+      color: #0c6b58;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color .2s ease, border-color .2s ease;
+      flex: 0 0 auto;
+    }
+
+    button#pluginUploadBtn:hover {
+      background: #cde9ff;
+      border-color: #85c1ff;
+    }
+
+    button#pluginUploadBtn svg {
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
     @media (max-width: 920px) {
       .layout { grid-template-columns: 1fr; height: auto; min-height: 100vh; overflow: visible; }
       .aside { height: auto; overflow-y: visible; }
       .main { height: auto; overflow: visible; grid-template-rows: auto auto; }
-      .workspace-body { min-height: auto; overflow-y: visible; }
+      .workspace-body { height: auto; overflow-y: visible; display: flex; flex-direction: column; }
+      .section { height: auto; display: none; }
+      .section.active { height: auto; display: block; flex: initial; }
+      #tasks.section.active { height: auto; overflow: visible; flex: initial; }
+      #plugins.section.active { height: auto; overflow: visible; flex: initial; }
       .grid { grid-template-columns: 1fr; }
       body.panel-collapsed .layout { grid-template-columns: 1fr; }
       body.panel-collapsed .menu-text { opacity: 1; max-width: 180px; }
@@ -527,6 +594,7 @@
       height: 100%;
       min-height: 0;
       overflow: hidden;
+      padding: 14px;
     }
 
     .ops-nav {
@@ -611,11 +679,380 @@
       font-size: .8rem;
     }
 
+    .plugin-layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 12px;
+      height: 100%;
+      min-height: 0;
+      overflow: hidden;
+      padding: 14px;
+    }
+
+    .plugin-tree-panel,
+    .plugin-detail-panel {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .plugin-tree-panel {
+      padding: 8px;
+      overflow-y: auto;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+    }
+
+    .plugin-detail-panel {
+      padding: 12px;
+      overflow-y: auto;
+      display: grid;
+      align-content: start;
+      gap: 12px;
+    }
+
+    .plugin-tree-group {
+      display: grid;
+      gap: 6px;
+    }
+
+    .plugin-tree-label {
+      color: var(--muted);
+      font-size: .8rem;
+      margin: 2px 2px 0;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .tree-node {
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--ink);
+      padding: 8px 10px;
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tree-node:hover,
+    .tree-node.active {
+      background: #eef8f4;
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .tree-node.plugin-root {
+      font-weight: 700;
+    }
+
+    .tree-overview-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      cursor: pointer;
+      line-height: 1.4;
+      min-height: 32px;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .tree-overview-btn:hover {
+      background: #f5f5f5;
+    }
+
+    .tree-overview-btn .tree-section-title {
+      flex: 1;
+    }
+
+    .tree-node.child-level-1 { padding-left: 24px; }
+    .tree-node.child-level-2 { padding-left: 42px; }
+
+    /* 树形展开/收起支持 */
+    details.tree-section {
+      display: grid;
+      gap: 6px;
+    }
+
+    details.tree-section summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 6px 8px;
+      user-select: none;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      line-height: 1.4;
+      min-height: 32px;
+    }
+
+    details.tree-section summary:hover {
+      background: #f5f5f5;
+    }
+
+    details.tree-section summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details.tree-section summary::before {
+      content: '▶';
+      display: inline-block;
+      font-size: .75rem;
+      transition: transform .2s ease;
+      color: var(--muted);
+      flex: 0 0 auto;
+    }
+
+    details.tree-section[open] summary::before {
+      transform: rotate(90deg);
+    }
+
+    details.tree-section.nested-tree-section {
+      margin-left: 8px;
+    }
+
+    details.tree-section.nested-tree-section > summary {
+      padding-left: 8px;
+      font-size: .9rem;
+    }
+
+    details.tree-section.nested-tree-section > summary::before {
+      content: '▶';
+      display: inline-block;
+      font-size: .72rem;
+      transition: transform .2s ease;
+      color: var(--muted);
+      flex: 0 0 auto;
+    }
+
+    details.tree-section.nested-tree-section[open] > summary::before {
+      transform: rotate(90deg);
+    }
+
+    .tree-section-title {
+      font-weight: 700;
+      flex: 1;
+      font-size: 1rem;
+    }
+
+    details.tree-section.nested-tree-section .tree-section-title {
+      font-size: .9rem;
+      font-weight: 600;
+    }
+
+    .plugin-overview-section {
+      display: grid;
+      gap: 10px;
+    }
+
+    .plugin-overview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .plugin-overview-upload-btn {
+      flex: 0 0 auto;
+    }
+
+    .tree-node-name {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tree-node-count {
+      color: var(--muted);
+      font-size: .78rem;
+      flex: 0 0 auto;
+    }
+
+    .detail-list-link {
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .detail-list-link:hover {
+      text-decoration: underline;
+    }
+
+    .plugin-detail-head {
+      display: grid;
+      gap: 8px;
+      padding-bottom: 10px;
+      border-bottom: 1px dashed var(--line);
+    }
+
+    .plugin-detail-title {
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .plugin-detail-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .contract-block {
+      display: grid;
+      gap: 8px;
+    }
+
+    .contract-block-title {
+      font-size: .9rem;
+      font-weight: 700;
+    }
+
+    .contract-item {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fffdf9;
+      overflow: hidden;
+    }
+
+    .contract-item summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 10px 12px;
+      display: grid;
+      gap: 5px;
+    }
+
+    .contract-item summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .contract-name-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .contract-name {
+      font-weight: 700;
+    }
+
+    .contract-desc {
+      color: var(--muted);
+      font-size: .84rem;
+    }
+
+    .contract-detail {
+      border-top: 1px dashed var(--line);
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .contract-section-title {
+      font-size: .82rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .field-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .field-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 9px 10px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .field-head {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+
+    .field-name {
+      font-weight: 700;
+    }
+
+    .field-required {
+      color: var(--bad);
+      margin-right: 4px;
+      font-weight: 700;
+    }
+
+    .field-tags {
+      display: inline-flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .field-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #fffdf8;
+      color: var(--muted);
+      font-size: .74rem;
+    }
+
+    .upload-inline {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .upload-file-name {
+      color: var(--muted);
+      font-size: .86rem;
+    }
+
+    .error-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .error-item {
+      border: 1px solid #e8b5b5;
+      border-radius: 10px;
+      background: #fff4f4;
+      color: var(--bad);
+      padding: 9px 10px;
+      font-size: .84rem;
+    }
+
     @media (max-width: 920px) {
       .ops-layout { grid-template-columns: 1fr; }
       .ops-layout { height: auto; min-height: 0; overflow: visible; }
       .ops-nav, .ops-detail { height: auto; overflow: visible; }
       .mini-grid { grid-template-columns: 1fr; }
+      .plugin-layout { grid-template-columns: 1fr; min-height: 0; }
       #tasks.section.active { min-height: 0; overflow: visible; }
     }
   </style>
@@ -633,6 +1070,7 @@
           <button type="button" data-tab="overview" class="active"><span class="menu-icon">◍</span><span class="menu-text">运行总览</span></button>
           <button type="button" data-tab="tasks"><span class="menu-icon">▤</span><span class="menu-text">任务与会话</span></button>
           <button type="button" data-tab="env"><span class="menu-icon">⌁</span><span class="menu-text">Env 管理</span></button>
+          <button type="button" data-tab="plugins"><span class="menu-icon">⬢</span><span class="menu-text">插件目录</span></button>
           <button type="button" data-tab="workflow"><span class="menu-icon">◧</span><span class="menu-text">Workflow 设计</span></button>
         </div>
       </div>
@@ -678,6 +1116,13 @@
             <button class="ghost" id="envCancelBtn">取消</button>
           </div>
           <div id="envGroups" class="env-groups"></div>
+        </section>
+
+        <section id="plugins" class="section card">
+          <div class="plugin-layout">
+            <aside id="pluginTree" class="plugin-tree-panel"></aside>
+            <section id="pluginDetail" class="plugin-detail-panel"></section>
+          </div>
         </section>
 
         <section id="workflow" class="section card">
@@ -736,6 +1181,10 @@
     let envRevealAll = false;
     let taskWorkspaceData = { tasks: [], sessions: [] };
     let taskWorkspaceSelected = { type: 'root', taskId: '' };
+    let pluginCatalogData = { items: [], errors: [] };
+    let pluginPanelSelected = { type: 'root', package: '', kind: '', fullName: '' };
+    let pluginTreeState = { packages: {}, groups: {} };
+    let selectedPluginFile = null;
     let copyToastTimer = null;
     const PANEL_COLLAPSE_KEY = 'weboter.panel.collapsed';
     const AUTO_REFRESH_KEY = 'weboter.panel.autoRefresh';
@@ -746,6 +1195,7 @@
       overview: { title: '运行总览', desc: '查看服务状态、队列与最近执行信息。' },
       tasks: { title: '任务与会话', desc: '快速观察最近任务和会话状态。' },
       env: { title: 'Env 管理', desc: '维护 service 内部受管环境变量。' },
+      plugins: { title: '插件目录', desc: '查看 builtin 与已加载插件，并上传新的 zip 插件包。' },
       workflow: { title: 'Workflow 设计', desc: '该区域将在后续版本补齐。' },
       user: { title: '用户', desc: '登录与会话管理。' },
       system: { title: '系统', desc: '系统状态与运维信息。' },
@@ -926,6 +1376,436 @@
           <div class="v">${item.v}</div>
         </div>
       `).join('');
+    }
+
+    function sourceLabel(source) {
+      if (!source) return 'unknown';
+      if (source === 'builtin') return 'builtin';
+      if (source.startsWith('plugin_root:')) return 'plugin_root';
+      if (source.startsWith('entry_point:')) return 'entry_point';
+      return source;
+    }
+
+    function sanitizeInternalText(text) {
+      const raw = String(text ?? '');
+      return raw
+        .replace(/plugin_root:[^\s]+/g, 'plugin_root')
+        .replace(/\/[A-Za-z0-9._\-/]+/g, '[internal path]');
+    }
+
+    function renderFieldList(fields, kind) {
+      if (!fields || fields.length === 0) {
+        return '<div class="placeholder" style="padding:10px;">未声明' + (kind === 'input' ? '输入' : '输出') + '约定</div>';
+      }
+      return `<div class="field-list">${fields.map((field) => {
+        const tags = [];
+        if (kind === 'input') {
+          tags.push(`<span class="field-tag">${(field.accepted_types || ['any']).join(' | ')}</span>`);
+          if (field.default !== undefined && field.default !== null && field.default !== '') {
+            tags.push(`<span class="field-tag">default: ${valueToDisplayText(field.default)}</span>`);
+          }
+        } else if (field.type) {
+          tags.push(`<span class="field-tag">${field.type}</span>`);
+        }
+        return `<div class="field-card">
+          <div class="field-head">
+            <span class="field-name mono">${kind === 'input' && field.required ? '<span class="field-required">*</span>' : ''}${field.name || '-'}</span>
+            <span class="field-tags">${tags.join('')}</span>
+          </div>
+          <div class="contract-desc">${field.description || '无说明'}</div>
+        </div>`;
+      }).join('')}</div>`;
+    }
+
+    function findPluginSelection() {
+      const items = pluginCatalogData.items || [];
+      if (pluginPanelSelected.type === 'overview') {
+        return { overview: true };
+      }
+      if (pluginPanelSelected.type === 'plugin' && pluginPanelSelected.package) {
+        const plugin = items.find((item) => item.package === pluginPanelSelected.package);
+        if (plugin) return { plugin };
+      }
+      if (pluginPanelSelected.type === 'kind-group' && pluginPanelSelected.package && pluginPanelSelected.kind) {
+        const plugin = items.find((item) => item.package === pluginPanelSelected.package);
+        if (plugin) return { plugin, kindGroup: pluginPanelSelected.kind };
+      }
+      if (pluginPanelSelected.type === 'leaf' && pluginPanelSelected.package && pluginPanelSelected.fullName) {
+        const plugin = items.find((item) => item.package === pluginPanelSelected.package);
+        if (plugin) {
+          const collection = pluginPanelSelected.kind === 'control' ? (plugin.controls || []) : (plugin.actions || []);
+          const leaf = collection.find((item) => item.full_name === pluginPanelSelected.fullName);
+          if (leaf) return { plugin, leaf };
+        }
+      }
+      return null;
+    }
+
+    function ensurePluginSelection(items) {
+      const selected = findPluginSelection();
+      if (selected) return;
+      // 默认选中"总览"节点
+      pluginPanelSelected = { type: 'overview', package: '', kind: '', fullName: '' };
+    }
+
+    function pluginGroupStateKey(packageName, kind) {
+      return `${packageName}:${kind}`;
+    }
+
+    function isPluginPackageOpen(packageName) {
+      if (Object.prototype.hasOwnProperty.call(pluginTreeState.packages, packageName)) {
+        return pluginTreeState.packages[packageName];
+      }
+      return true;
+    }
+
+    function isPluginGroupOpen(packageName, kind) {
+      const key = pluginGroupStateKey(packageName, kind);
+      if (Object.prototype.hasOwnProperty.call(pluginTreeState.groups, key)) {
+        return pluginTreeState.groups[key];
+      }
+      if (pluginPanelSelected.package === packageName && pluginPanelSelected.kind === kind) {
+        return true;
+      }
+      return false;
+    }
+
+    function openPluginPath(packageName, kind = '') {
+      if (!packageName) return;
+      pluginTreeState.packages[packageName] = true;
+      if (kind) {
+        pluginTreeState.groups[pluginGroupStateKey(packageName, kind)] = true;
+      }
+    }
+
+    function renderPluginTree(items) {
+      const tree = qs('#pluginTree');
+      if (!items || items.length === 0) {
+        tree.innerHTML = '<div class="placeholder">暂无插件</div>';
+        return;
+      }
+
+      // 构建总览和上传按钮（一行）
+      const overviewHtml = `
+        <div style="display:flex;align-items:center;gap:8px;padding:0;margin-bottom:0;">
+          <button class="tree-overview-btn" id="overviewBtn">总览</button>
+          <button class="primary" id="pluginUploadBtn">
+            <svg viewBox="0 0 24 24"><path d="M12 2v12M5 10l7-7 7 7M5 20h14"/></svg>
+          </button>
+          <input id="pluginFileInput" type="file" accept=".zip" hidden />
+        </div>
+        <div style="height:1px;background:var(--line);margin:6px 0;"></div>
+      `;
+
+      // 构建插件包节点
+      const packagesHtml = items.map((plugin) => {
+        const actionCount = plugin.actions?.length || 0;
+        const controlCount = plugin.controls?.length || 0;
+        const packageOpenAttr = isPluginPackageOpen(plugin.package) ? ' open' : '';
+        return `
+          <details class="tree-section"${packageOpenAttr}>
+            <summary class="plugin-package-summary" data-plugin-package="${plugin.package}" data-package-name="${plugin.package}">
+              <span class="tree-section-title mono">${plugin.package}</span>
+            </summary>
+            <div style="display:grid;gap:6px;">
+              ${actionCount > 0 ? renderPluginTreeSection('Actions', plugin.actions || [], plugin.package) : ''}
+              ${controlCount > 0 ? renderPluginTreeSection('Controls', plugin.controls || [], plugin.package) : ''}
+            </div>
+          </details>
+        `;
+      }).join('');
+
+      tree.innerHTML = overviewHtml + packagesHtml;
+
+      // 总览按钮点击
+      const overviewBtn = qs('#overviewBtn');
+      if (overviewBtn) {
+        overviewBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          pluginPanelSelected = { type: 'overview', package: '', kind: '', fullName: '' };
+          renderPluginsPanel(pluginCatalogData);
+        });
+      }
+
+      // 上传按钮事件
+      const uploadBtn = qs('#pluginUploadBtn');
+      const fileInput = qs('#pluginFileInput');
+      if (uploadBtn && fileInput) {
+        uploadBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          fileInput.click();
+        });
+        fileInput.addEventListener('change', async (e) => {
+          if (e.target.files.length > 0) {
+            try {
+              uploadBtn.disabled = true;
+              uploadBtn.innerHTML = '<span style="font-size: .9rem;">上传中...</span>';
+              await uploadPluginFile(e.target.files[0]);
+              showCopyToast('✓ 插件上传成功');
+              fileInput.value = '';
+            } catch (err) {
+              alert('✗ 上传失败: ' + (err.message || '未知错误'));
+            } finally {
+              uploadBtn.disabled = false;
+              uploadBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2v12M5 10l7-7 7 7M5 20h14"/></svg>';
+            }
+          }
+        });
+      }
+
+      // 插件包点击（防止冒泡到 details 展开动作）
+      for (const summary of qsa('.plugin-package-summary')) {
+        summary.addEventListener('click', (e) => {
+          e.preventDefault();
+          const packageName = summary.getAttribute('data-package-name');
+          pluginTreeState.packages[packageName] = !isPluginPackageOpen(packageName);
+          pluginPanelSelected = { type: 'plugin', package: packageName, kind: '', fullName: '' };
+          renderPluginsPanel(pluginCatalogData);
+        });
+      }
+
+      // Actions/Controls 二级节点点击
+      for (const summary of qsa('.plugin-kind-summary')) {
+        summary.addEventListener('click', (e) => {
+          e.preventDefault();
+          const packageName = summary.getAttribute('data-plugin-package');
+          const kind = summary.getAttribute('data-plugin-kind-group');
+          const stateKey = pluginGroupStateKey(packageName, kind);
+          pluginTreeState.packages[packageName] = true;
+          pluginTreeState.groups[stateKey] = !isPluginGroupOpen(packageName, kind);
+          pluginPanelSelected = {
+            type: 'kind-group',
+            package: packageName,
+            kind: kind,
+            fullName: '',
+          };
+          renderPluginsPanel(pluginCatalogData);
+        });
+      }
+
+      // 具体 action/control 项点击
+      for (const btn of qsa('[data-plugin-leaf]')) {
+        btn.addEventListener('click', () => {
+          const packageName = btn.getAttribute('data-plugin-package') || '';
+          const kind = btn.getAttribute('data-plugin-kind') || '';
+          openPluginPath(packageName, kind);
+          pluginPanelSelected = {
+            type: 'leaf',
+            package: packageName,
+            kind: kind,
+            fullName: btn.getAttribute('data-plugin-leaf') || '',
+          };
+          renderPluginsPanel(pluginCatalogData);
+        });
+      }
+    }
+
+    function renderPluginTreeSection(label, items, packageName) {
+      if (!items || items.length === 0) {
+        return '';
+      }
+
+      const kind = label === 'Actions' ? 'action' : 'control';
+      const kindTag = label === 'Actions' ? 'A' : 'C';
+      const groupOpenAttr = isPluginGroupOpen(packageName, kind) ? ' open' : '';
+
+      return `
+        <details class="tree-section nested-tree-section"${groupOpenAttr}>
+          <summary class="plugin-kind-summary" data-plugin-package="${packageName}" data-plugin-kind-group="${kind}">
+            <span style="color:var(--muted);">${label} (${items.length})</span>
+          </summary>
+          <div style="display:grid;gap:4px;">
+            ${items.map((item) => {
+              const selected = pluginPanelSelected.type === 'leaf' && pluginPanelSelected.fullName === item.full_name;
+              return `
+                <button class="tree-node child-level-1 ${selected ? 'active' : ''}" 
+                  data-plugin-leaf="${item.full_name}" 
+                  data-plugin-kind="${kind}" 
+                  data-plugin-package="${packageName}">
+                  <span class="tree-node-name mono">${item.name}</span>
+                  <span class="tree-node-count">${kindTag}</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        </details>
+      `;
+    }
+
+    function renderPluginDetail(items) {
+      const detail = qs('#pluginDetail');
+      if (!items || items.length === 0) {
+        detail.innerHTML = '<div class="placeholder">当前没有可展示的插件。</div>';
+        return;
+      }
+
+      // 处理总览节点
+      if (pluginPanelSelected.type === 'overview') {
+        const totalActions = items.reduce((sum, item) => sum + (item.action_count || 0), 0);
+        const totalControls = items.reduce((sum, item) => sum + (item.control_count || 0), 0);
+        const errors = pluginCatalogData.errors || [];
+
+        detail.innerHTML = `
+          <div class="plugin-detail-head">
+            <div class="plugin-detail-title">系统插件概览</div>
+            <div class="contract-desc">查看已加载的所有插件及统计信息</div>
+          </div>
+          <div class="mini-grid">
+            <div class="mini-card"><div class="mini-k">插件数</div><div class="mini-v">${items.length}</div></div>
+            <div class="mini-card"><div class="mini-k">Actions</div><div class="mini-v">${totalActions}</div></div>
+            <div class="mini-card"><div class="mini-k">Controls</div><div class="mini-v">${totalControls}</div></div>
+          </div>
+          ${errors.length ? `
+            <div>
+              <div class="contract-section-title" style="color:var(--bad);">⚠ 加载错误</div>
+              <div class="error-list">
+                ${errors.map((item) => `<div class="error-item">
+                  <div><strong>${sourceLabel(item.source || 'plugin')}</strong></div>
+                  <div class="mono">${item.module || item.package || '-'}</div>
+                  <div>${sanitizeInternalText(item.error || 'unknown error')}</div>
+                </div>`).join('')}
+              </div>
+            </div>
+          ` : '<div class="placeholder" style="padding:12px;">✓ 所有插件加载正常</div>'}
+        `;
+        return;
+      }
+
+      // 处理 Actions/Controls 分类节点
+      if (pluginPanelSelected.type === 'kind-group') {
+        const plugin = items.find(p => p.package === pluginPanelSelected.package);
+        if (!plugin) {
+          detail.innerHTML = '<div class="placeholder">未找到插件</div>';
+          return;
+        }
+
+        const isAction = pluginPanelSelected.kind === 'action';
+        const kindLabel = isAction ? 'Actions' : 'Controls';
+        const items_list = isAction ? (plugin.actions || []) : (plugin.controls || []);
+
+        detail.innerHTML = `
+          <div class="plugin-detail-head">
+            <div class="plugin-detail-title">${kindLabel}</div>
+            <div class="contract-desc">共 ${items_list.length} 个 ${kindLabel === 'Actions' ? '动作' : '控制'}</div>
+            <div class="plugin-detail-meta">
+              <span class="field-tag">插件 ${plugin.package}</span>
+            </div>
+          </div>
+          ${renderPluginDetailList(items_list, plugin, isAction ? 'action' : 'control')}
+        `;
+        return;
+      }
+
+      // 处理插件级选择：只显示插件信息和数量，不显示列表
+      const selected = findPluginSelection();
+      const plugin = selected?.plugin || items[0];
+      if (!plugin) {
+        detail.innerHTML = '<div class="placeholder">当前没有可展示的插件。</div>';
+        return;
+      }
+
+      // 处理 leaf 级选择
+      const leaf = selected?.leaf || null;
+      if (leaf) {
+        detail.innerHTML = `
+          <div class="plugin-detail-head">
+            <div class="plugin-detail-title mono">${leaf.full_name}</div>
+            <div class="contract-desc">${leaf.description || '无说明'}</div>
+            <div class="plugin-detail-meta">
+              <span class="field-tag">${leaf.kind}</span>
+              <span class="field-tag">plugin ${plugin.package}</span>
+              <span class="field-tag">${sourceLabel(plugin.source)}</span>
+            </div>
+          </div>
+          <div>
+            <div class="contract-section-title">输入约定</div>
+            ${renderFieldList(leaf.inputs || [], 'input')}
+          </div>
+          <div>
+            <div class="contract-section-title">输出约定</div>
+            ${renderFieldList(leaf.outputs || [], 'output')}
+          </div>
+        `;
+        return;
+      }
+
+      // 插件级选择：只显示基本信息和数量
+      detail.innerHTML = `
+        <div class="plugin-detail-head">
+          <div class="plugin-detail-title mono">${plugin.package}</div>
+          <div class="contract-desc">${plugin.description || '该插件未提供额外说明。'}</div>
+          <div class="plugin-detail-meta">
+            <span class="field-tag">${sourceLabel(plugin.source)}</span>
+            <span class="field-tag">actions ${plugin.action_count || 0}</span>
+            <span class="field-tag">controls ${plugin.control_count || 0}</span>
+          </div>
+        </div>
+        <div class="mini-grid">
+          <div class="mini-card"><div class="mini-k">Action 数量</div><div class="mini-v">${plugin.action_count || 0}</div></div>
+          <div class="mini-card"><div class="mini-k">Control 数量</div><div class="mini-v">${plugin.control_count || 0}</div></div>
+          <div class="mini-card"><div class="mini-k">来源</div><div class="mini-v">${sourceLabel(plugin.source)}</div></div>
+        </div>
+        <div style="padding:12px;color:var(--muted);font-size:.9rem;background:#f5f5f5;border-radius:10px;">
+          点击左侧 <strong>Actions</strong> 或 <strong>Controls</strong> 查看具体内容
+        </div>
+      `;
+    }
+
+    function renderPluginDetailList(items, plugin, kind) {
+      return `
+        <div class="contract-block">
+          <table>
+            <thead><tr><th>名称</th><th>说明</th><th>输入</th><th>输出</th></tr></thead>
+            <tbody>
+              ${items.map((item) => `<tr><td class="mono"><a href="javascript:void(0)" class="detail-list-link" data-full-name="${item.full_name}" data-kind="${kind}" data-package="${plugin.package}">${item.name}</a></td><td>${item.description || '-'}</td><td>${item.inputs?.length || 0}</td><td>${item.outputs?.length || 0}</td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderPluginsPanel(data) {
+      const items = data.items || [];
+      pluginCatalogData = data;
+      ensurePluginSelection(items);
+      renderPluginTree(items);
+      renderPluginDetail(items);
+
+      // 添加表格链接点击事件
+      for (const link of qsa('.detail-list-link')) {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          const packageName = link.getAttribute('data-package');
+          const kind = link.getAttribute('data-kind');
+          openPluginPath(packageName, kind);
+          pluginPanelSelected = {
+            type: 'leaf',
+            package: packageName,
+            kind: kind,
+            fullName: link.getAttribute('data-full-name'),
+          };
+          renderPluginsPanel(pluginCatalogData);
+        });
+      }
+    }
+
+    async function refreshPluginsPanel() {
+      const data = await request('/panel/api/plugins');
+      renderPluginsPanel(data);
+    }
+
+    async function uploadPluginFile(file) {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/panel/api/plugins/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || data.detail || `HTTP ${res.status}`);
+      // 上传成功后刷新插件列表
+      await refreshPluginsPanel();
+      return data;
     }
 
     function findLinkedSession(task) {
@@ -1312,6 +2192,8 @@
         await refreshTasksWorkspace();
       } else if (active === 'env') {
         await refreshEnv();
+      } else if (active === 'plugins') {
+        await refreshPluginsPanel();
       } else if (active === 'system') {
         await refreshSystemPanel();
       }
@@ -1397,6 +2279,8 @@
           await refreshTasksWorkspace().catch(err => alert(err.message));
         } else if (target === 'env') {
           await refreshEnv().catch(err => alert(err.message));
+        } else if (target === 'plugins') {
+          await refreshPluginsPanel().catch(err => alert(err.message));
         } else if (target === 'system') {
           await refreshSystemPanel().catch(err => alert(err.message));
         }

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import os
+from pathlib import Path
+import tempfile
 from typing import Any, Callable
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from starlette.responses import HTMLResponse
 
 from weboter.app.panel import PANEL_SESSION_COOKIE, PanelAuthManager, read_panel_html
@@ -93,6 +95,40 @@ def register_panel_routes(
             return service.delete_env(name)
         except Exception as exc:
             raise_http_error(exc)
+
+    @app.get("/panel/api/plugins", tags=["panel"])
+    def panel_plugins() -> dict[str, Any]:
+        try:
+            return service.list_plugins()
+        except Exception as exc:
+            raise_http_error(exc)
+
+    @app.post("/panel/api/plugins/refresh", tags=["panel"])
+    def panel_plugins_refresh() -> dict[str, Any]:
+        try:
+            return service.refresh_plugins()
+        except Exception as exc:
+            raise_http_error(exc)
+
+    @app.post("/panel/api/plugins/upload", tags=["panel"])
+    async def panel_plugins_upload(file: UploadFile = File(...)) -> dict[str, Any]:
+        suffix = Path(file.filename or "plugin.zip").suffix or ".zip"
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                temp_path = Path(tmp.name)
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    tmp.write(chunk)
+            return service.install_plugin_archive(temp_path)
+        except Exception as exc:
+            raise_http_error(exc)
+        finally:
+            await file.close()
+            if temp_path and temp_path.exists():
+                temp_path.unlink(missing_ok=True)
 
     @app.get("/panel/api/overview", tags=["panel"])
     def panel_overview() -> dict[str, Any]:

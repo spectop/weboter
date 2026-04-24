@@ -34,6 +34,13 @@ _registered_control_packages: set[str] = set()
 _initialized = False
 _initialized_plugin_root: str | None = None
 _load_seq = 0
+_last_refresh_payload: dict[str, Any] = {
+    "plugin_root": "",
+    "loaded": [],
+    "loaded_count": 0,
+    "errors": [],
+    "error_count": 0,
+}
 
 
 def ensure_plugins_initialized(config: AppConfig | None = None) -> None:
@@ -48,7 +55,7 @@ def ensure_plugins_initialized(config: AppConfig | None = None) -> None:
 
 
 def refresh_plugins(config: AppConfig | None = None) -> dict[str, Any]:
-    global _initialized_plugin_root
+    global _initialized_plugin_root, _last_refresh_payload
     target_config = config or load_app_config()
     ensure_builtin_packages_registered()
     _unregister_previous_plugins()
@@ -81,13 +88,24 @@ def refresh_plugins(config: AppConfig | None = None) -> dict[str, Any]:
 
     _initialized_plugin_root = str(target_config.plugin_root_path())
 
-    return {
+    _last_refresh_payload = {
         "plugin_root": str(target_config.plugin_root_path()),
         "loaded": loaded,
         "loaded_count": len(loaded),
         "errors": errors,
         "error_count": len(errors),
     }
+    return dict(_last_refresh_payload)
+
+
+def get_plugin_snapshot(config: AppConfig | None = None) -> dict[str, Any]:
+    target_config = config or load_app_config()
+    ensure_plugins_initialized(target_config)
+    payload = dict(_last_refresh_payload)
+    payload.setdefault("plugin_root", str(target_config.plugin_root_path()))
+    payload["loaded"] = list(payload.get("loaded") or [])
+    payload["errors"] = list(payload.get("errors") or [])
+    return payload
 
 
 def _unregister_previous_plugins() -> None:

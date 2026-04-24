@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weboter"
-version = "0.1.27"
+version = "0.1.32"
 description = "Config-driven browser workflow automation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 service = [
   "fastapi>=0.116.0",
+  "python-multipart>=0.0.9",
   "playwright>=1.57.0",
   "uvicorn>=0.35.0",
 ]

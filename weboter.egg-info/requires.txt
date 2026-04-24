@@ -10,5 +10,6 @@ opencv-python>=4.10.0
 
 [service]
 fastapi>=0.116.0
+python-multipart>=0.0.9
 playwright>=1.57.0
 uvicorn>=0.35.0
