@@ -9,7 +9,7 @@ from typing import Any, Callable
 from fastapi import FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from starlette.responses import HTMLResponse
 
-from weboter.app.panel import PANEL_SESSION_COOKIE, PanelAuthManager, read_panel_html
+from weboter.app.panel import PANEL_SESSION_COOKIE, PanelAuthManager, read_panel_asset, read_panel_html
 from weboter.app.schemas import EnvSetRequest, PanelLoginRequest
 
 
@@ -22,9 +22,23 @@ def register_panel_routes(
     panel_auth: PanelAuthManager,
     raise_http_error: Callable[[Exception], None],
 ) -> None:
+    asset_media_types = {
+        ".css": "text/css; charset=utf-8",
+        ".js": "application/javascript; charset=utf-8",
+    }
+
     @app.get("/panel", tags=["panel"])
     def panel_page() -> HTMLResponse:
         return HTMLResponse(read_panel_html())
+
+    @app.get("/panel/assets/{asset_path:path}", tags=["panel"])
+    def panel_asset(asset_path: str) -> Response:
+        try:
+            suffix = Path(asset_path).suffix.lower()
+            media_type = asset_media_types.get(suffix, "application/octet-stream")
+            return Response(read_panel_asset(asset_path), media_type=media_type)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"panel asset not found: {asset_path}") from exc
 
     @app.get("/panel/api/status", tags=["panel"])
     def panel_status() -> dict[str, Any]:
@@ -208,3 +222,9 @@ def register_panel_routes(
             return session_manager.request_interrupt(session_id, reason)
         except Exception as exc:
             raise_http_error(exc)
+
+    @app.get("/panel/{panel_path:path}", tags=["panel"])
+    def panel_subpage(panel_path: str) -> HTMLResponse:
+        if panel_path.startswith("api/") or panel_path.startswith("assets/"):
+            raise HTTPException(status_code=404, detail="panel route not found")
+        return HTMLResponse(read_panel_html())

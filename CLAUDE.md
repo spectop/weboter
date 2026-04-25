@@ -32,6 +32,38 @@ MCP、AI 调试、目录自动监控和 GUI 仍是后续演进方向，但不应
 - 任何代码修改完成后，都要主动判断这次改动是否需要重新打包 wheel；如果需要，则由 agent 自行执行版本升级与打包，不再等待用户额外提醒。
 - 每次重新打包后，都必须明确告知用户新的 wheel 文件名；如果文件名发生变化，也必须显式说明新旧文件名差异。
 
+### 接口文档先行（强制）
+
+- 任何会被其他模块复用的能力，都必须先更新 `doc/interfaces/*.md` 再改实现。
+- 对外能力包括但不限于：HTTP 路径、MCP 工具参数、面板 API 字段、插件导出契约、public/contracts 签名。
+- 如未同步接口文档，视为改动不完整。
+- 跨模块改动必须遵循 `doc/interfaces/agent-collaboration.md` 的 Handoff Package 交接协议。
+
+### 模块化 Agent / Skills（.claude）
+
+处理对应模块任务时，优先使用以下指导文件：
+
+- Core
+   - Agent: `.claude/agents/core-boundary-guardian.md`
+   - Skill: `.claude/skills/core-contract-first/SKILL.md`
+   - Interface doc: `doc/interfaces/core.md`
+- Service
+   - Agent: `.claude/agents/service-surface-owner.md`
+   - Skill: `.claude/skills/service-interface-keeper/SKILL.md`
+   - Interface doc: `doc/interfaces/service.md`
+- MCP
+   - Agent: `.claude/agents/mcp-contract-operator.md`
+   - Skill: `.claude/skills/mcp-surface-governance/SKILL.md`
+   - Interface doc: `doc/interfaces/mcp.md`
+- Panel
+   - Agent: `.claude/agents/panel-shell-steward.md`
+   - Skill: `.claude/skills/panel-modularization/SKILL.md`
+   - Interface doc: `doc/interfaces/panel.md`
+- Plugin
+   - Agent: `.claude/agents/plugin-integration-maintainer.md`
+   - Skill: `.claude/skills/plugin-contract-governance/SKILL.md`
+   - Interface doc: `doc/interfaces/plugin.md`
+
 ### MCP 输出约束
 
 - 任何新增或修改的 MCP 工具，都必须默认避免返回巨量上下文。

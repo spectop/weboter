@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weboter"
-version = "0.1.32"
+version = "0.1.33"
 description = "Config-driven browser workflow automation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,4 +40,4 @@ where = ["."]
 include = ["weboter*"]
 
 [tool.setuptools.package-data]
-"weboter.app.panel" = ["static/*.html"]
+"weboter.app.panel" = ["static/*.html", "static/assets/*.css", "static/assets/*.js"]

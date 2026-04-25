@@ -26,6 +26,8 @@ weboter/app/task_manager.py
 weboter/app/panel/__init__.py
 weboter/app/panel/auth.py
 weboter/app/panel/static/index.html
+weboter/app/panel/static/assets/panel.css
+weboter/app/panel/static/assets/panel.js
 weboter/app/routers/__init__.py
 weboter/app/routers/catalog.py
 weboter/app/routers/env.py

@@ -17,7 +17,6 @@ Weboter 是一个配置驱动的网页自动化框架。当前阶段优先交付
 ## 安装
 
 如果你只需要从客户端启动 MCP adapter，或只需要 HTTP / MCP 远程访问能力，可以安装轻量基础包：
-
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -102,9 +101,33 @@ weboter service stop
 - workflow 格式说明： [doc/workflow.md](doc/workflow.md)
 - service / CLI 详细操作： [doc/service_usage.md](doc/service_usage.md)
 - service / client / mcp 架构： [doc/design/mcp_architecture.md](doc/design/mcp_architecture.md)
+- 文档总索引： [doc/INDEX.md](doc/INDEX.md)
+- 模块接口文档总览： [doc/interfaces/README.md](doc/interfaces/README.md)
+- Core 接口： [doc/interfaces/core.md](doc/interfaces/core.md)
+- Service 接口： [doc/interfaces/service.md](doc/interfaces/service.md)
+- MCP 接口： [doc/interfaces/mcp.md](doc/interfaces/mcp.md)
+- Panel 接口： [doc/interfaces/panel.md](doc/interfaces/panel.md)
+- Plugin 接口： [doc/interfaces/plugin.md](doc/interfaces/plugin.md)
+- Agent 协作协议： [doc/interfaces/agent-collaboration.md](doc/interfaces/agent-collaboration.md)
 - MCP 导入样例： [doc/mcp.weboter.json](doc/mcp.weboter.json)
 - Windows WSL / pipx / uvx 样例： [doc/mcp.weboter.windows-wsl.json](doc/mcp.weboter.windows-wsl.json)、 [doc/mcp.weboter.windows-pipx.json](doc/mcp.weboter.windows-pipx.json)、 [doc/mcp.weboter.windows-uvx.json](doc/mcp.weboter.windows-uvx.json)
 - 开发计划： [doc/development_plan.md](doc/development_plan.md)
+
+### 接口文档优先规则
+
+从当前版本起，凡是会被其他模块复用的能力（路径、字段、函数签名、工具参数）都必须先更新 `doc/interfaces/*`，再改实现。
+
+## Agent 与 Skills（.claude）
+
+项目在 `.claude/agents` 和 `.claude/skills` 下提供了按模块拆分的协作指导：
+
+- Core：契约与分层边界
+- Service：HTTP/CLI 接口面
+- MCP：工具面与权限 profile
+- Panel：页面壳、资源与 API 边界
+- Plugin：插件契约与加载机制
+
+使用这些指导时，必须先读取对应模块的接口文档（`doc/interfaces/*.md`）。
 
 ## MCP 接入
 
