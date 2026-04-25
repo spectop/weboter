@@ -75,7 +75,20 @@
         </section>
 
         <section id="workflow" class="section card">
-          <div class="placeholder">当前阶段先稳定管理与调试链路。workflow 图形化编辑区将在后续版本设计。</div>
+          <div class="workflow-layout" id="workflowLayout">
+            <aside class="workflow-nav-panel" id="workflowNav"></aside>
+            <section class="workflow-canvas-panel">
+              <div class="workflow-toolbar">
+                <div class="workflow-toolbar-left">
+                  <button class="ghost" id="workflowRefreshBtn">刷新列表</button>
+                  <button class="primary" id="workflowCreateTaskBtn" disabled>创建 task</button>
+                </div>
+                <button class="ghost" id="workflowPropToggleBtn">隐藏属性窗格</button>
+              </div>
+              <div class="workflow-canvas" id="workflowCanvas"></div>
+            </section>
+            <aside class="workflow-prop-panel" id="workflowProp"></aside>
+          </div>
         </section>
 
         <section id="user" class="section card">

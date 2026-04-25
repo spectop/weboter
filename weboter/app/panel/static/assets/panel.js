@@ -13,15 +13,25 @@
     let copyToastTimer = null;
     const PANEL_COLLAPSE_KEY = 'weboter.panel.collapsed';
     const AUTO_REFRESH_KEY = 'weboter.panel.autoRefresh';
+    const WORKFLOW_PROP_COLLAPSE_KEY = 'weboter.panel.workflow.propCollapsed';
     let autoRefreshEnabled = false;
     let autoRefreshTimer = null;
+    let workflowWorkspaceData = {
+      items: [],
+      workflowItems: [],
+      selectedWorkflow: '',
+      flow: null,
+      flowPath: '',
+      selectedNodeKey: '',
+      propCollapsed: false,
+    };
 
     const tabMeta = {
       overview: { title: '运行总览', desc: '查看服务状态、队列与最近执行信息。' },
       tasks: { title: '任务与会话', desc: '快速观察最近任务和会话状态。' },
       env: { title: 'Env 管理', desc: '维护 service 内部受管环境变量。' },
       plugins: { title: '插件目录', desc: '查看 builtin 与已加载插件，并上传新的 zip 插件包。' },
-      workflow: { title: 'Workflow 设计', desc: '该区域将在后续版本补齐。' },
+      workflow: { title: 'Workflow 设计', desc: '左侧选择 workflow，中间查看节点，右侧查看节点属性。' },
       user: { title: '用户', desc: '登录与会话管理。' },
       system: { title: '系统', desc: '系统状态与运维信息。' },
     };
@@ -157,6 +167,28 @@
 
     function parseValue(input) {
       return String(input ?? '');
+    }
+
+    function escapeHtml(input) {
+      return String(input ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function renderKeyValueRows(obj) {
+      const entries = Object.entries(obj || {});
+      if (entries.length === 0) {
+        return '<tr><td colspan="2" class="mono">(空)</td></tr>';
+      }
+      return entries.map(([key, value]) => `
+        <tr>
+          <th>${escapeHtml(key)}</th>
+          <td class="mono">${escapeHtml(valueToDisplayText(value))}</td>
+        </tr>
+      `).join('');
     }
 
     async function ensureLogin() {
@@ -633,6 +665,276 @@
       return data;
     }
 
+    function updateWorkflowLayoutState() {
+      const layout = qs('#workflowLayout');
+      if (!layout) return;
+      layout.classList.toggle('prop-collapsed', !!workflowWorkspaceData.propCollapsed);
+      const toggleBtn = qs('#workflowPropToggleBtn');
+      if (toggleBtn) {
+        toggleBtn.textContent = workflowWorkspaceData.propCollapsed ? '显示属性窗格' : '隐藏属性窗格';
+      }
+    }
+
+    function selectWorkflowNode(nodeId) {
+      workflowWorkspaceData.selectedNodeKey = nodeId || '';
+      renderWorkflowWorkspace();
+    }
+
+    function getWorkflowDisplayItem(workflowName) {
+      const items = workflowWorkspaceData.workflowItems || [];
+      return items.find((item) => item.workflow === workflowName) || { workflow: workflowName, name: workflowName };
+    }
+
+    function collectFlowGroups(flow, parentKey = 'main', parentLabel = '主流程', depth = 0) {
+      if (!flow) return [];
+      const flowLabel = depth === 0
+        ? `主流程 · ${flow.name || flow.flow_id || '-'}`
+        : `${parentLabel} / ${flow.name || flow.flow_id || '-'}`;
+      const group = {
+        flowKey: parentKey,
+        flowLabel,
+        flowId: flow.flow_id || '',
+        depth,
+        nodes: flow.nodes || [],
+      };
+      const subflows = flow.sub_flows || [];
+      const children = subflows.flatMap((subFlow, idx) => collectFlowGroups(subFlow, `${parentKey}.${idx}`, flowLabel, depth + 1));
+      return [group, ...children];
+    }
+
+    function flattenFlowNodes(flow) {
+      const groups = collectFlowGroups(flow);
+      return groups.flatMap((group) => {
+        const nodes = group.nodes || [];
+        return nodes.map((node) => ({
+          key: `${group.flowKey}::${node.node_id || ''}`,
+          group,
+          node,
+        }));
+      });
+    }
+
+    function renderWorkflowNav() {
+      const nav = qs('#workflowNav');
+      const items = workflowWorkspaceData.workflowItems || [];
+      if (!nav) return;
+      nav.innerHTML = `
+        <div class="workflow-nav-title">workflow 列表 (${items.length})</div>
+        ${items.length > 0 ? items.map((item) => {
+          const workflowName = item.workflow || '';
+          const displayName = item.name || workflowName;
+          const active = workflowWorkspaceData.selectedWorkflow === workflowName ? 'active' : '';
+          return `<button class="workflow-nav-node ${active}" data-workflow-name="${escapeHtml(workflowName)}" title="${escapeHtml(displayName)}">
+            <span class="workflow-nav-node-name">${escapeHtml(displayName)}</span>
+            <span class="workflow-nav-node-id mono">${escapeHtml(workflowName)}</span>
+          </button>`;
+        }).join('') : '<div class="placeholder">当前目录没有 workflow 文件。</div>'}
+      `;
+
+      for (const btn of qsa('[data-workflow-name]')) {
+        btn.addEventListener('click', async () => {
+          const name = btn.getAttribute('data-workflow-name') || '';
+          if (!name || name === workflowWorkspaceData.selectedWorkflow) return;
+          await loadWorkflowDetail(name);
+          renderWorkflowWorkspace();
+        });
+      }
+    }
+
+    function renderWorkflowCanvas() {
+      const canvas = qs('#workflowCanvas');
+      const createBtn = qs('#workflowCreateTaskBtn');
+      if (!canvas) return;
+
+      const flow = workflowWorkspaceData.flow;
+      const groups = collectFlowGroups(flow);
+      const allNodes = flattenFlowNodes(flow);
+      if (createBtn) createBtn.disabled = !workflowWorkspaceData.selectedWorkflow;
+
+      if (!flow) {
+        canvas.innerHTML = '<div class="placeholder">请选择左侧 workflow。</div>';
+        return;
+      }
+
+      canvas.innerHTML = `
+        ${groups.map((group) => {
+          const groupNodes = (group.nodes || []).map((node) => {
+            const nodeId = node.node_id || '';
+            const nodeKey = `${group.flowKey}::${nodeId}`;
+            const isActive = workflowWorkspaceData.selectedNodeKey === nodeKey;
+            const typeLabel = node.action || node.control || 'unknown';
+            const extra = node.action ? 'action' : (node.control ? 'control' : 'node');
+            return `
+              <button class="workflow-node-card ${isActive ? 'active' : ''}" data-workflow-node-key="${escapeHtml(nodeKey)}">
+                <div class="workflow-node-title">${escapeHtml(node.name || nodeId || '(未命名节点)')}</div>
+                <div class="workflow-node-meta">id: ${escapeHtml(nodeId)}</div>
+                <div class="workflow-node-meta">${extra}: ${escapeHtml(typeLabel)}</div>
+                <div class="workflow-node-meta">inputs: ${Object.keys(node.inputs || {}).length} · params: ${Object.keys(node.params || {}).length}</div>
+              </button>
+            `;
+          }).join('');
+          return `
+            <div class="workflow-flow-group">
+              <div class="workflow-flow-group-head">
+                <span class="workflow-flow-group-title">${escapeHtml(group.flowLabel)}</span>
+                <span class="workflow-flow-group-count">${(group.nodes || []).length} 节点</span>
+              </div>
+              <div class="workflow-node-grid">${groupNodes || '<div class="placeholder">该流程没有节点。</div>'}</div>
+            </div>
+          `;
+        }).join('')}
+        <div class="workflow-canvas-footnote k">总节点数: ${allNodes.length} · 当前仅展示节点，不绘制连线。点击画布空白处可切换回 workflow 属性。</div>
+      `;
+
+      for (const btn of qsa('[data-workflow-node-key]')) {
+        btn.addEventListener('click', () => {
+          const nodeKey = btn.getAttribute('data-workflow-node-key') || '';
+          selectWorkflowNode(nodeKey);
+        });
+      }
+
+      canvas.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (target.closest('.workflow-node-card')) return;
+        if (workflowWorkspaceData.selectedNodeKey) {
+          workflowWorkspaceData.selectedNodeKey = '';
+          renderWorkflowWorkspace();
+        }
+      });
+    }
+
+    function renderWorkflowProps() {
+      const prop = qs('#workflowProp');
+      if (!prop) return;
+
+      const flow = workflowWorkspaceData.flow;
+      if (!flow) {
+        prop.innerHTML = '<div class="placeholder">暂无属性内容。</div>';
+        return;
+      }
+
+      const nodes = flattenFlowNodes(flow);
+      const selectedNodeWithMeta = nodes.find((item) => item.key === workflowWorkspaceData.selectedNodeKey) || null;
+      const selectedNode = selectedNodeWithMeta?.node || null;
+      const selectedGroup = selectedNodeWithMeta?.group || null;
+      if (!selectedNode) {
+        const workflowMeta = getWorkflowDisplayItem(workflowWorkspaceData.selectedWorkflow);
+        const subflowCount = (flow.sub_flows || []).length;
+        prop.innerHTML = `
+          <div class="workflow-prop-head">
+            <div class="workflow-prop-title">Flow 属性</div>
+            <div class="k">当前未选中节点。</div>
+          </div>
+          <div class="workflow-prop-block">
+            <table class="workflow-prop-table">
+              <tbody>
+                <tr><th>workflow</th><td class="mono">${escapeHtml(workflowMeta.workflow || '-')}</td></tr>
+                <tr><th>display_name</th><td>${escapeHtml(workflowMeta.name || '-')}</td></tr>
+                <tr><th>flow_id</th><td class="mono">${escapeHtml(flow.flow_id || '-')}</td></tr>
+                <tr><th>name</th><td>${escapeHtml(flow.name || '-')}</td></tr>
+                <tr><th>description</th><td>${escapeHtml(flow.description || '-')}</td></tr>
+                <tr><th>start_node_id</th><td class="mono">${escapeHtml(flow.start_node_id || '-')}</td></tr>
+                <tr><th>total_nodes</th><td>${nodes.length}</td></tr>
+                <tr><th>sub_flows</th><td>${subflowCount}</td></tr>
+                <tr><th>path</th><td class="mono">${escapeHtml(workflowWorkspaceData.flowPath || '-')}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        `;
+        return;
+      }
+
+      prop.innerHTML = `
+        <div class="workflow-prop-head">
+          <div class="workflow-prop-title">节点属性</div>
+          <div class="k">${escapeHtml(selectedNode.name || selectedNode.node_id || '-')}</div>
+        </div>
+        <div class="workflow-prop-block">
+          <table class="workflow-prop-table">
+            <tbody>
+              <tr><th>node_id</th><td class="mono">${escapeHtml(selectedNode.node_id || '-')}</td></tr>
+              <tr><th>name</th><td>${escapeHtml(selectedNode.name || '-')}</td></tr>
+              <tr><th>description</th><td>${escapeHtml(selectedNode.description || '-')}</td></tr>
+              <tr><th>flow_group</th><td>${escapeHtml(selectedGroup?.flowLabel || '-')}</td></tr>
+              <tr><th>flow_id</th><td class="mono">${escapeHtml(selectedGroup?.flowId || '-')}</td></tr>
+              <tr><th>action</th><td class="mono">${escapeHtml(selectedNode.action || '-')}</td></tr>
+              <tr><th>control</th><td class="mono">${escapeHtml(selectedNode.control || '-')}</td></tr>
+              <tr><th>log</th><td class="mono">${escapeHtml(selectedNode.log || '-')}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="workflow-prop-block">
+          <div class="contract-section-title">输入映射</div>
+          <table class="workflow-prop-table"><tbody>${renderKeyValueRows(selectedNode.inputs || {})}</tbody></table>
+        </div>
+        <div class="workflow-prop-block">
+          <div class="contract-section-title">参数</div>
+          <table class="workflow-prop-table"><tbody>${renderKeyValueRows(selectedNode.params || {})}</tbody></table>
+        </div>
+        <div class="workflow-prop-block">
+          <div class="contract-section-title">outputs</div>
+          <table class="workflow-prop-table"><tbody>
+            ${(selectedNode.outputs || []).length > 0 ? (selectedNode.outputs || []).map((item) => `
+              <tr><th>${escapeHtml(item.name || item.src || '-')}</th><td class="mono">${escapeHtml(`src=${item.src || '-'}, pos=${item.pos || '-'}, cvt=${item.cvt || '-'}`)}</td></tr>
+            `).join('') : '<tr><td colspan="2" class="mono">(空)</td></tr>'}
+          </tbody></table>
+        </div>
+      `;
+    }
+
+    function renderWorkflowWorkspace() {
+      updateWorkflowLayoutState();
+      renderWorkflowNav();
+      renderWorkflowCanvas();
+      renderWorkflowProps();
+    }
+
+    async function loadWorkflowDetail(name) {
+      const data = await request(`/panel/api/workflows/${encodeURIComponent(name)}`);
+      workflowWorkspaceData.selectedWorkflow = name;
+      workflowWorkspaceData.flow = data.flow || null;
+      workflowWorkspaceData.flowPath = data.path || '';
+      const nodes = flattenFlowNodes(workflowWorkspaceData.flow);
+      const hasSelected = nodes.some((item) => item.key === workflowWorkspaceData.selectedNodeKey);
+      workflowWorkspaceData.selectedNodeKey = hasSelected ? workflowWorkspaceData.selectedNodeKey : '';
+    }
+
+    async function refreshWorkflowWorkspace() {
+      const data = await request('/panel/api/workflows');
+      const items = data.items || [];
+      const workflowItems = data.workflows || items.map((item) => ({ workflow: item, name: item }));
+      workflowWorkspaceData.items = items;
+      workflowWorkspaceData.workflowItems = workflowItems;
+
+      if (!items.length) {
+        workflowWorkspaceData.selectedWorkflow = '';
+        workflowWorkspaceData.flow = null;
+        workflowWorkspaceData.flowPath = '';
+        workflowWorkspaceData.selectedNodeKey = '';
+        renderWorkflowWorkspace();
+        return;
+      }
+
+      let target = workflowWorkspaceData.selectedWorkflow;
+      if (!target || !items.includes(target)) {
+        target = items[0];
+      }
+      await loadWorkflowDetail(target);
+      renderWorkflowWorkspace();
+    }
+
+    async function createTaskFromCurrentWorkflow() {
+      const workflow = workflowWorkspaceData.selectedWorkflow;
+      if (!workflow) {
+        alert('请先选择 workflow');
+        return;
+      }
+      const data = await request(`/panel/api/workflows/${encodeURIComponent(workflow)}/create-task`, 'POST');
+      const taskId = data?.task?.task_id || '-';
+      showCopyToast(`task 已创建: ${taskId}`);
+    }
+
     function findLinkedSession(task) {
       const taskId = task?.task_id || '';
       const sessionId = task?.session_id || taskId;
@@ -1019,6 +1321,8 @@
         await refreshEnv();
       } else if (active === 'plugins') {
         await refreshPluginsPanel();
+      } else if (active === 'workflow') {
+        await refreshWorkflowWorkspace();
       } else if (active === 'system') {
         await refreshSystemPanel();
       }
@@ -1078,6 +1382,20 @@
       await refreshEnv();
     });
 
+    qs('#workflowRefreshBtn').addEventListener('click', () => {
+      refreshWorkflowWorkspace().catch(err => alert(err.message));
+    });
+
+    qs('#workflowCreateTaskBtn').addEventListener('click', () => {
+      createTaskFromCurrentWorkflow().catch(err => alert(err.message));
+    });
+
+    qs('#workflowPropToggleBtn').addEventListener('click', () => {
+      workflowWorkspaceData.propCollapsed = !workflowWorkspaceData.propCollapsed;
+      localStorage.setItem(WORKFLOW_PROP_COLLAPSE_KEY, workflowWorkspaceData.propCollapsed ? '1' : '0');
+      updateWorkflowLayoutState();
+    });
+
     qs('#loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       loginHint.textContent = '';
@@ -1106,6 +1424,8 @@
           await refreshEnv().catch(err => alert(err.message));
         } else if (target === 'plugins') {
           await refreshPluginsPanel().catch(err => alert(err.message));
+        } else if (target === 'workflow') {
+          await refreshWorkflowWorkspace().catch(err => alert(err.message));
         } else if (target === 'system') {
           await refreshSystemPanel().catch(err => alert(err.message));
         }
@@ -1115,6 +1435,8 @@
     (async () => {
       setPanelCollapsed(localStorage.getItem(PANEL_COLLAPSE_KEY) === '1');
       setAutoRefresh(localStorage.getItem(AUTO_REFRESH_KEY) === '1');
+      workflowWorkspaceData.propCollapsed = localStorage.getItem(WORKFLOW_PROP_COLLAPSE_KEY) === '1';
+      updateWorkflowLayoutState();
       renderTopIcons();
       const loggedIn = await ensureLogin();
       if (loggedIn) {

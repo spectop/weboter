@@ -11,6 +11,7 @@ from starlette.responses import HTMLResponse
 
 from weboter.app.panel import PANEL_SESSION_COOKIE, PanelAuthManager, read_panel_asset, read_panel_html
 from weboter.app.schemas import EnvSetRequest, PanelLoginRequest
+from weboter.core.workflow_io import WorkflowReader
 
 
 def register_panel_routes(
@@ -143,6 +144,61 @@ def register_panel_routes(
             await file.close()
             if temp_path and temp_path.exists():
                 temp_path.unlink(missing_ok=True)
+
+    @app.get("/panel/api/workflows", tags=["panel"])
+    def panel_workflow_list() -> dict[str, Any]:
+        try:
+            items = service.list_directory_workflows(service.workflow_store)
+            workflows: list[dict[str, str]] = []
+            for workflow_name in items:
+                display_name = workflow_name
+                try:
+                    resolution = service.resolve_from_directory(service.workflow_store, workflow_name)
+                    flow = WorkflowReader.from_json(resolution.source_path)
+                    if flow.name:
+                        display_name = flow.name
+                except Exception:
+                    # 某个 workflow 读取失败时，列表仍然返回其逻辑名，避免整个页面不可用。
+                    display_name = workflow_name
+                workflows.append({"workflow": workflow_name, "name": display_name})
+            return {
+                "directory": str(service.workflow_store),
+                "items": items,
+                "workflows": workflows,
+            }
+        except Exception as exc:
+            raise_http_error(exc)
+
+    @app.get("/panel/api/workflows/{workflow_name:path}", tags=["panel"])
+    def panel_workflow_detail(workflow_name: str) -> dict[str, Any]:
+        try:
+            resolution = service.resolve_from_directory(service.workflow_store, workflow_name)
+            flow = WorkflowReader.from_json(resolution.source_path)
+            return {
+                "name": workflow_name,
+                "path": str(resolution.source_path),
+                "flow": asdict(flow),
+            }
+        except Exception as exc:
+            raise_http_error(exc)
+
+    @app.post("/panel/api/workflows/{workflow_name:path}/create-task", tags=["panel"])
+    def panel_workflow_create_task(workflow_name: str) -> dict[str, Any]:
+        try:
+            resolution = service.resolve_from_directory(service.workflow_store, workflow_name)
+            task = task_manager.submit(
+                resolution.source_path,
+                trigger="panel_workflow",
+                pause_before_start=False,
+                breakpoints=[],
+            )
+            return {
+                "workflow": workflow_name,
+                "resolved": str(resolution.source_path),
+                "task": asdict(task),
+            }
+        except Exception as exc:
+            raise_http_error(exc)
 
     @app.get("/panel/api/overview", tags=["panel"])
     def panel_overview() -> dict[str, Any]:
