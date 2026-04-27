@@ -900,6 +900,72 @@
         return;
       }
 
+      const actionName = selectedNode.action || '';
+      const controlName = selectedNode.control || '';
+      const outputItems = selectedNode.outputs || [];
+      const outputSection = outputItems.length > 0
+        ? `
+            <div class="contract-section-title">outputs</div>
+            <table class="workflow-prop-table"><tbody>
+              ${outputItems.map((item) => `
+                <tr><th>${escapeHtml(item.name || item.src || '-')}</th><td class="mono">${escapeHtml(`src=${item.src || '-'}, pos=${item.pos || '-'}, cvt=${item.cvt || '-'}`)}</td></tr>
+              `).join('')}
+            </tbody></table>
+          `
+        : '';
+      const actionSection = actionName
+        ? `
+          <div class="workflow-prop-block workflow-component workflow-component--action">
+            <div class="workflow-component-head">
+              <div class="workflow-component-title">Action 组件</div>
+              <span class="workflow-component-kind">Action</span>
+            </div>
+            <table class="workflow-prop-table">
+              <tbody>
+                <tr><th>type</th><td class="mono">${escapeHtml(actionName)}</td></tr>
+              </tbody>
+            </table>
+            <div class="contract-section-title">inputs</div>
+            <table class="workflow-prop-table"><tbody>${renderKeyValueRows(selectedNode.inputs || {})}</tbody></table>
+            ${outputSection}
+          </div>
+        `
+        : `
+          <div class="workflow-prop-block workflow-component workflow-component--empty">
+            <div class="workflow-component-head">
+              <div class="workflow-component-title">Action 组件</div>
+              <span class="workflow-component-kind">Action</span>
+            </div>
+            <div class="placeholder">该节点未挂载 Action 组件。</div>
+          </div>
+        `;
+
+      const controlSection = controlName
+        ? `
+          <div class="workflow-prop-block workflow-component workflow-component--control">
+            <div class="workflow-component-head">
+              <div class="workflow-component-title">Control 组件</div>
+              <span class="workflow-component-kind">Control</span>
+            </div>
+            <table class="workflow-prop-table">
+              <tbody>
+                <tr><th>type</th><td class="mono">${escapeHtml(controlName)}</td></tr>
+              </tbody>
+            </table>
+            <div class="contract-section-title">params</div>
+            <table class="workflow-prop-table"><tbody>${renderKeyValueRows(selectedNode.params || {}, resolveNodeRefParamKeys(controlName))}</tbody></table>
+          </div>
+        `
+        : `
+          <div class="workflow-prop-block workflow-component workflow-component--empty">
+            <div class="workflow-component-head">
+              <div class="workflow-component-title">Control 组件</div>
+              <span class="workflow-component-kind">Control</span>
+            </div>
+            <div class="placeholder">该节点未挂载 Control 组件。</div>
+          </div>
+        `;
+
       prop.innerHTML = `
         <div class="workflow-prop-head">
           <div class="workflow-prop-title">节点属性</div>
@@ -913,28 +979,12 @@
               <tr><th>description</th><td>${escapeHtml(selectedNode.description || '-')}</td></tr>
               <tr><th>flow_group</th><td>${escapeHtml(selectedGroup?.flowLabel || '-')}</td></tr>
               <tr><th>flow_id</th><td class="mono">${escapeHtml(selectedGroup?.flowId || '-')}</td></tr>
-              <tr><th>action</th><td class="mono">${escapeHtml(selectedNode.action || '-')}</td></tr>
-              <tr><th>control</th><td class="mono">${escapeHtml(selectedNode.control || '-')}</td></tr>
               <tr><th>log</th><td class="mono">${escapeHtml(selectedNode.log || '-')}</td></tr>
             </tbody>
           </table>
         </div>
-        <div class="workflow-prop-block">
-          <div class="contract-section-title">输入映射</div>
-          <table class="workflow-prop-table"><tbody>${renderKeyValueRows(selectedNode.inputs || {})}</tbody></table>
-        </div>
-        <div class="workflow-prop-block">
-          <div class="contract-section-title">参数</div>
-          <table class="workflow-prop-table"><tbody>${renderKeyValueRows(selectedNode.params || {}, resolveNodeRefParamKeys(selectedNode.control))}</tbody></table>
-        </div>
-        <div class="workflow-prop-block">
-          <div class="contract-section-title">outputs</div>
-          <table class="workflow-prop-table"><tbody>
-            ${(selectedNode.outputs || []).length > 0 ? (selectedNode.outputs || []).map((item) => `
-              <tr><th>${escapeHtml(item.name || item.src || '-')}</th><td class="mono">${escapeHtml(`src=${item.src || '-'}, pos=${item.pos || '-'}, cvt=${item.cvt || '-'}`)}</td></tr>
-            `).join('') : '<tr><td colspan="2" class="mono">(空)</td></tr>'}
-          </tbody></table>
-        </div>
+        ${actionSection}
+        ${controlSection}
       `;
     }
 

@@ -763,6 +763,9 @@
       display: grid;
       align-content: start;
       gap: 10px;
+      overscroll-behavior: contain;
+      min-width: 0;
+      min-height: 0;
     }
 
     .workflow-layout.prop-collapsed .workflow-prop-panel {
@@ -953,13 +956,79 @@
       padding: 10px;
       display: grid;
       gap: 8px;
+      min-width: 0;
+    }
+
+    .workflow-component {
+      position: relative;
+      overflow: visible;
+      --component-bg: #fff;
+      --component-border: var(--line);
+      --component-pill-color: var(--muted);
+      --component-pill-bg: #f8f8f8;
+      --component-pill-border: var(--line);
+      border-color: var(--component-border);
+      background: var(--component-bg);
+    }
+
+    .workflow-component-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding-bottom: 6px;
+      border-bottom: 1px dashed var(--line);
+    }
+
+    .workflow-component-title {
+      font-size: .92rem;
+      font-weight: 700;
+    }
+
+    .workflow-component-kind {
+      font-size: .72rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      border-radius: 999px;
+      padding: 2px 8px;
+      border: 1px solid var(--component-pill-border);
+      color: var(--component-pill-color);
+      background: var(--component-pill-bg);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .workflow-component--action {
+      --component-border: #99f6e4;
+      --component-bg: #f0fdfa;
+      --component-pill-color: #0f766e;
+      --component-pill-border: #5eead4;
+      --component-pill-bg: #ccfbf1;
+    }
+
+    .workflow-component--control {
+      --component-border: #c4b5fd;
+      --component-bg: #f5f3ff;
+      --component-pill-color: #6d28d9;
+      --component-pill-border: #a78bfa;
+      --component-pill-bg: #ede9fe;
+    }
+
+    .workflow-component--empty {
+      background: #fafafa;
+      border-style: dashed;
     }
 
     .workflow-prop-table {
       width: 100%;
       border-collapse: collapse;
-      table-layout: fixed;
+      table-layout: auto;
       font-size: .84rem;
+    }
+
+    .workflow-component .workflow-prop-table,
+    .workflow-component .workflow-prop-table th,
+    .workflow-component .workflow-prop-table td {
+      background: transparent;
     }
 
     .workflow-prop-table th,
@@ -969,6 +1038,7 @@
       border-bottom: 1px dashed var(--line);
       vertical-align: top;
       word-break: break-word;
+      overflow-wrap: anywhere;
     }
 
     .workflow-prop-table th {
