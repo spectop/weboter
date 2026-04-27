@@ -1,6 +1,16 @@
 from dataclasses import dataclass, field
 from typing import Dict, List
 
+
+class NodeId(str):
+    """节点 ID 引用的标记类型。
+
+    本质上仍是 str，但用于语义标注：该字符串值是对另一个节点的 ID 引用，
+    而非普通文本或变量名。常见于控制参数（如 next_node、loop_back 等）。
+    """
+    pass
+
+
 @dataclass
 class NodeOutputConfig:
     """Define how to store the output of a node"""

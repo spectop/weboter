@@ -905,6 +905,18 @@
       cursor: pointer;
     }
 
+    /* 控制节点：蓝紫色调 */
+    .workflow-node-card.node-type--control {
+      border-color: #a78bfa;
+      background: #f5f3ff;
+    }
+
+    /* 混合节点（有 action 且有 control）：琥珀色调 */
+    .workflow-node-card.node-type--mixed {
+      border-color: #fbbf24;
+      background: #fffbeb;
+    }
+
     .workflow-node-card:hover,
     .workflow-node-card.active {
       border-color: var(--accent);
@@ -963,6 +975,21 @@
       width: 32%;
       color: var(--muted);
       font-weight: 600;
+    }
+
+    /* 节点 ID 引用类型标签 */
+    .prop-node-ref-tag {
+      display: inline-block;
+      font-size: .72rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      background: #ede9fe;
+      color: #6d28d9;
+      border: 1px solid #c4b5fd;
+      border-radius: 4px;
+      padding: 0 5px;
+      margin-right: 5px;
+      vertical-align: baseline;
+      line-height: 1.6;
     }
 
     .plugin-tree-group {

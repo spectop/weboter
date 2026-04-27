@@ -178,17 +178,68 @@
         .replaceAll("'", '&#39;');
     }
 
-    function renderKeyValueRows(obj) {
+    // 识别表示“节点引用”的类型名（大小写不敏感）
+    const NODE_REF_TYPE_NAMES = new Set(['nodeid', 'node']);
+
+    // 插件目录尚未加载时的最小兜底契约
+    const CONTROL_INPUT_TYPES_FALLBACK = {
+      'builtin.NextNode': {
+        next_node: ['NodeId'],
+      },
+      'builtin.LoopUntil': {
+        loop_back: ['NodeId'],
+        loop_out: ['NodeId'],
+        loop_fail_node: ['NodeId'],
+      },
+    };
+
+    function isNodeRefAcceptedTypes(acceptedTypes) {
+      const list = Array.isArray(acceptedTypes) ? acceptedTypes : [];
+      return list.some((name) => NODE_REF_TYPE_NAMES.has(String(name || '').toLowerCase()));
+    }
+
+    function findControlDeclaration(controlFullName) {
+      if (!controlFullName) return null;
+      const plugins = pluginCatalogData.items || [];
+      for (const plugin of plugins) {
+        const controls = plugin.controls || [];
+        const hit = controls.find((item) => item.full_name === controlFullName);
+        if (hit) return hit;
+      }
+      return null;
+    }
+
+    function resolveNodeRefParamKeys(controlFullName) {
+      const fromCatalog = findControlDeclaration(controlFullName);
+      if (fromCatalog && Array.isArray(fromCatalog.inputs)) {
+        return new Set(
+          fromCatalog.inputs
+            .filter((field) => isNodeRefAcceptedTypes(field.accepted_types))
+            .map((field) => field.name)
+            .filter(Boolean)
+        );
+      }
+
+      const fallback = CONTROL_INPUT_TYPES_FALLBACK[controlFullName] || {};
+      return new Set(
+        Object.entries(fallback)
+          .filter(([, acceptedTypes]) => isNodeRefAcceptedTypes(acceptedTypes))
+          .map(([name]) => name)
+      );
+    }
+
+    function renderKeyValueRows(obj, nodeRefKeys) {
       const entries = Object.entries(obj || {});
       if (entries.length === 0) {
         return '<tr><td colspan="2" class="mono">(空)</td></tr>';
       }
-      return entries.map(([key, value]) => `
-        <tr>
-          <th>${escapeHtml(key)}</th>
-          <td class="mono">${escapeHtml(valueToDisplayText(value))}</td>
-        </tr>
-      `).join('');
+      return entries.map(([key, value]) => {
+        const isNodeRef = nodeRefKeys && nodeRefKeys.has(key);
+        const valHtml = isNodeRef
+          ? `<span class="prop-node-ref-tag">node</span><span class="mono">${escapeHtml(valueToDisplayText(value))}</span>`
+          : `<span class="mono">${escapeHtml(valueToDisplayText(value))}</span>`;
+        return `<tr><th>${escapeHtml(key)}</th><td>${valHtml}</td></tr>`;
+      }).join('');
     }
 
     async function ensureLogin() {
@@ -764,8 +815,12 @@
             const isActive = workflowWorkspaceData.selectedNodeKey === nodeKey;
             const typeLabel = node.action || node.control || 'unknown';
             const extra = node.action ? 'action' : (node.control ? 'control' : 'node');
+            const nodeTypeClass = node.action && node.control ? 'node-type--mixed'
+              : node.control ? 'node-type--control'
+              : node.action ? 'node-type--action'
+              : '';
             return `
-              <button class="workflow-node-card ${isActive ? 'active' : ''}" data-workflow-node-key="${escapeHtml(nodeKey)}">
+              <button class="workflow-node-card ${isActive ? 'active' : ''} ${nodeTypeClass}" data-workflow-node-key="${escapeHtml(nodeKey)}">
                 <div class="workflow-node-title">${escapeHtml(node.name || nodeId || '(未命名节点)')}</div>
                 <div class="workflow-node-meta">id: ${escapeHtml(nodeId)}</div>
                 <div class="workflow-node-meta">${extra}: ${escapeHtml(typeLabel)}</div>
@@ -870,7 +925,7 @@
         </div>
         <div class="workflow-prop-block">
           <div class="contract-section-title">参数</div>
-          <table class="workflow-prop-table"><tbody>${renderKeyValueRows(selectedNode.params || {})}</tbody></table>
+          <table class="workflow-prop-table"><tbody>${renderKeyValueRows(selectedNode.params || {}, resolveNodeRefParamKeys(selectedNode.control))}</tbody></table>
         </div>
         <div class="workflow-prop-block">
           <div class="contract-section-title">outputs</div>

@@ -9,13 +9,13 @@ class NextNode(ControlBase):
             name="next_node",
             description="The ID of the next node to execute",
             required=True,
-            accepted_types=["string"]
+            accepted_types=["NodeId"]
         )
     ]
     outputs: OutputFieldDeclaration = OutputFieldDeclaration(
         name="next_node",
         description="The ID of the next node to execute",
-        type="string"
+        type="NodeId"
     )
 
     async def calc_next(self, io: IOPipe) -> str:
@@ -33,13 +33,13 @@ class LoopUntil(ControlBase):
             name="loop_back",
             description="The ID of the node to loop back to",
             required=True,
-            accepted_types=["string"]
+            accepted_types=["NodeId"]
         ),
         InputFieldDeclaration(
             name="loop_out",
             description="The ID of the node to exit the loop",
             required=True,
-            accepted_types=["string"]
+            accepted_types=["NodeId"]
         ),
         InputFieldDeclaration(
             name="var",
@@ -65,14 +65,14 @@ class LoopUntil(ControlBase):
             name="loop_fail_node",
             description="The node to go to if loop fails (only if loop_tries > 0, same as loop_out if not set)",
             required=False,
-            accepted_types=["string"],
+            accepted_types=["NodeId"],
             default=""
         )
     ]
     outputs: OutputFieldDeclaration = OutputFieldDeclaration(
         name="next_node",
         description="The ID of the next node to execute",
-        type="string"
+        type="NodeId"
     )
 
     async def calc_next(self, io: IOPipe) -> str:
