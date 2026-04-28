@@ -22,6 +22,8 @@ Service 是唯一执行控制面，负责：
   - `upload_workflow(source)`
   - `resolve_from_directory(directory, workflow_name=None)`
   - `list_directory_workflows(directory)`
+  - `update_workflow(directory, workflow_name, flow_data)`
+  - `delete_workflow(directory, workflow_name=None)`
   - `run_workflow(workflow_path, logger=None, hooks=None)`
 - 环境变量
   - `list_env(group=None)`
@@ -69,6 +71,8 @@ Service 是唯一执行控制面，负责：
 - `POST /workflow/upload`
 - `POST /workflow/dir`
 - `DELETE /workflow/dir`
+- `PUT /panel/api/workflows/{workflow_name}`（panel 工作流编辑保存）
+- `DELETE /panel/api/workflows/{workflow_name}`（panel workflow 删除）
 
 ### 3.5 Task / Session
 

@@ -80,10 +80,14 @@
             <section class="workflow-canvas-panel">
               <div class="workflow-toolbar">
                 <div class="workflow-toolbar-left">
-                  <button class="ghost" id="workflowRefreshBtn">刷新列表</button>
-                  <button class="primary" id="workflowCreateTaskBtn" disabled>创建 task</button>
+                  <button class="ghost icon-only" id="workflowRefreshBtn" title="刷新列表" aria-label="刷新列表"><span class="font-icon" aria-hidden="true">↻</span></button>
+                  <button class="ghost icon-only" id="workflowEditBtn" title="进入编辑" aria-label="进入编辑" disabled><span class="font-icon" aria-hidden="true">✎</span></button>
+                  <button class="ghost icon-only" id="workflowCancelEditBtn" title="退出编辑" aria-label="退出编辑" disabled><span class="font-icon" aria-hidden="true">✕</span></button>
+                  <button class="primary icon-only" id="workflowSaveBtn" title="保存 workflow" aria-label="保存 workflow" disabled><span class="font-icon" aria-hidden="true">💾</span></button>
+                  <button class="danger icon-only" id="workflowDeleteBtn" title="删除 workflow" aria-label="删除 workflow" disabled><span class="font-icon" aria-hidden="true">🗑</span></button>
+                  <button class="primary icon-only" id="workflowCreateTaskBtn" title="创建 task" aria-label="创建 task" disabled><span class="font-icon" aria-hidden="true">▶</span></button>
                 </div>
-                <button class="ghost" id="workflowPropToggleBtn">隐藏属性窗格</button>
+                <button class="ghost icon-only" id="workflowPropToggleBtn" title="隐藏属性窗格" aria-label="隐藏属性窗格"><span class="font-icon" aria-hidden="true">☰</span></button>
               </div>
               <div class="workflow-canvas" id="workflowCanvas"></div>
             </section>

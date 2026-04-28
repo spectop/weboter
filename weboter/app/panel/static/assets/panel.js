@@ -21,6 +21,8 @@
       workflowItems: [],
       selectedWorkflow: '',
       flow: null,
+      editFlow: null,
+      editMode: false,
       flowPath: '',
       selectedNodeKey: '',
       propCollapsed: false,
@@ -178,6 +180,50 @@
         .replaceAll("'", '&#39;');
     }
 
+    function deepClone(value) {
+      if (value === undefined) return undefined;
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function prettyJson(value, fallback) {
+      const target = value === undefined ? fallback : value;
+      try {
+        return JSON.stringify(target, null, 2);
+      } catch {
+        return JSON.stringify(fallback, null, 2);
+      }
+    }
+
+    function parseObjectJson(label, text, fallback = {}) {
+      const raw = String(text ?? '').trim();
+      if (!raw) return fallback;
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new Error(`${label} 不是合法 JSON`);
+      }
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+        throw new Error(`${label} 必须是 JSON 对象`);
+      }
+      return parsed;
+    }
+
+    function parseArrayJson(label, text, fallback = []) {
+      const raw = String(text ?? '').trim();
+      if (!raw) return fallback;
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new Error(`${label} 不是合法 JSON`);
+      }
+      if (!Array.isArray(parsed)) {
+        throw new Error(`${label} 必须是 JSON 数组`);
+      }
+      return parsed;
+    }
+
     // 识别表示“节点引用”的类型名（大小写不敏感）
     const NODE_REF_TYPE_NAMES = new Set(['nodeid', 'node']);
 
@@ -209,6 +255,69 @@
       return null;
     }
 
+    function findActionDeclaration(actionFullName) {
+      if (!actionFullName) return null;
+      const plugins = pluginCatalogData.items || [];
+      for (const plugin of plugins) {
+        const actions = plugin.actions || [];
+        const hit = actions.find((item) => item.full_name === actionFullName);
+        if (hit) return hit;
+      }
+      return null;
+    }
+
+    function listCatalogTypes(kind) {
+      const plugins = pluginCatalogData.items || [];
+      const names = [];
+      for (const plugin of plugins) {
+        const items = kind === 'action' ? (plugin.actions || []) : (plugin.controls || []);
+        for (const item of items) {
+          if (item.full_name) names.push(item.full_name);
+        }
+      }
+      return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+    }
+
+    function getNodeIdOptionsForFlow(flow, currentNodeId = '') {
+      const nodes = flow?.nodes || [];
+      const options = nodes
+        .map((item) => item.node_id || '')
+        .filter((id) => id && id !== currentNodeId)
+        .sort((a, b) => a.localeCompare(b));
+      return ['', ...options];
+    }
+
+    function normalizeAcceptedTypes(acceptedTypes) {
+      const list = Array.isArray(acceptedTypes) ? acceptedTypes : [];
+      return list.map((name) => String(name || '').toLowerCase());
+    }
+
+    function resolveFieldEditorType(field, flow, currentNodeId = '') {
+      const accepted = normalizeAcceptedTypes(field?.accepted_types);
+      if (accepted.some((name) => NODE_REF_TYPE_NAMES.has(name))) {
+        return {
+          type: 'select',
+          options: getNodeIdOptionsForFlow(flow, currentNodeId),
+        };
+      }
+      if (accepted.includes('bool') || accepted.includes('boolean')) {
+        return {
+          type: 'select',
+          options: ['', 'true', 'false'],
+        };
+      }
+      if (accepted.includes('int') || accepted.includes('float') || accepted.includes('number')) {
+        return {
+          type: 'number',
+          options: [],
+        };
+      }
+      return {
+        type: 'text',
+        options: [],
+      };
+    }
+
     function resolveNodeRefParamKeys(controlFullName) {
       const fromCatalog = findControlDeclaration(controlFullName);
       if (fromCatalog && Array.isArray(fromCatalog.inputs)) {
@@ -228,18 +337,196 @@
       );
     }
 
-    function renderKeyValueRows(obj, nodeRefKeys) {
-      const entries = Object.entries(obj || {});
-      if (entries.length === 0) {
+    function requiredLabel(label, required = false) {
+      const star = required ? '<span class="field-required">*</span>' : '';
+      return `${star}${escapeHtml(label)}`;
+    }
+
+    function renderOutputsRows(node) {
+      const outputs = Array.isArray(node?.outputs) ? node.outputs : [];
+      if (!outputs.length) {
+        const emptyNote = workflowWorkspaceData.editMode ? '当前无输出映射，可点击 + 添加。' : '(空)';
+        return `<div class="placeholder">${emptyNote}</div>`;
+      }
+      return `
+        <div class="workflow-output-list ${workflowWorkspaceData.editMode ? 'editable' : ''}">
+          ${outputs.map((item, index) => {
+            const src = String(item?.src || '').trim();
+            const name = String(item?.name || src || '').trim();
+            const pos = String(item?.pos || 'flow').trim() || 'flow';
+            const cvt = String(item?.cvt || '').trim();
+            const editableClass = workflowWorkspaceData.editMode ? 'editable' : '';
+            return `
+              <div class="workflow-output-item ${editableClass}" data-output-index="${index}">
+                <div class="workflow-output-row">
+                  <span class="workflow-output-label">src</span>
+                  <span class="workflow-output-name mono ${editableClass}" data-output-inline-field="src" data-output-index="${index}" title="${escapeHtml(src || '-')}\">${escapeHtml(src || '-')}</span>
+                </div>
+                <div class="workflow-output-row">
+                  <span class="workflow-output-label">cvt</span>
+                  <span class="workflow-output-cvt mono ${editableClass}" data-output-inline-field="cvt" data-output-index="${index}">${escapeHtml(cvt || 'raw')}</span>
+                </div>
+                <div class="workflow-output-row">
+                  <span class="workflow-output-label">to</span>
+                  <span class="workflow-output-path mono">
+                    <span class="workflow-output-chip workflow-output-chip--pos ${editableClass}" data-output-inline-field="pos" data-output-index="${index}">${escapeHtml(pos)}</span>
+                    <span>.</span>
+                    <span class="workflow-output-target-name ${editableClass}" data-output-inline-field="name" data-output-index="${index}">${escapeHtml(name || '-')}</span>
+                  </span>
+                </div>
+                ${workflowWorkspaceData.editMode ? '<button class="danger icon-only" type="button" data-output-delete="' + index + '" title="删除输出项" aria-label="删除输出项"><span class="font-icon" aria-hidden="true">🗑</span></button>' : ''}
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    function bindOutputEditors() {
+      if (!workflowWorkspaceData.editMode) return;
+      const draft = getWorkflowDraftFlow();
+      const context = getSelectedNodeContext(draft, workflowWorkspaceData.selectedNodeKey);
+      if (!context?.node) return;
+
+      const updateOutputField = (index, field, value) => {
+        const outputs = Array.isArray(context.node.outputs) ? context.node.outputs : [];
+        if (!outputs[index]) return;
+        outputs[index][field] = String(value ?? '').trim();
+        context.node.outputs = outputs;
+      };
+
+      for (const token of qsa('[data-output-inline-field][data-output-index]')) {
+        token.addEventListener('dblclick', () => {
+          if (!(token instanceof HTMLElement)) return;
+          const field = token.getAttribute('data-output-inline-field') || '';
+          const rawIndex = token.getAttribute('data-output-index') || '';
+          const index = Number(rawIndex);
+          if (!field || !Number.isInteger(index) || index < 0) return;
+
+          const outputs = Array.isArray(context.node.outputs) ? context.node.outputs : [];
+          const item = outputs[index];
+          if (!item) return;
+
+          if (field === 'pos' || field === 'cvt') {
+            const options = field === 'pos' ? ['flow', 'global'] : ['', 'int', 'float', 'str', 'bool'];
+            const current = String(item[field] || '').trim();
+            token.innerHTML = `<select class="workflow-edit-input mono">${options.map((option) => {
+              const selected = option === current ? 'selected' : '';
+              return `<option value="${escapeHtml(option)}" ${selected}>${escapeHtml(option || 'raw')}</option>`;
+            }).join('')}</select>`;
+            const select = token.querySelector('select');
+            if (!(select instanceof HTMLSelectElement)) return;
+            select.focus();
+            const commit = () => {
+              updateOutputField(index, field, select.value || '');
+              renderWorkflowProps();
+            };
+            select.addEventListener('change', commit);
+            select.addEventListener('blur', commit);
+            return;
+          }
+
+          const current = String(item[field] || '').trim();
+          token.innerHTML = `<input class="workflow-edit-input mono" value="${escapeHtml(current)}" />`;
+          const input = token.querySelector('input');
+          if (!(input instanceof HTMLInputElement)) return;
+          input.focus();
+          const commit = (rollback = false) => {
+            if (!rollback) {
+              updateOutputField(index, field, input.value || '');
+            }
+            renderWorkflowProps();
+          };
+          input.addEventListener('blur', () => commit(false));
+          input.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              commit(true);
+              return;
+            }
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commit(false);
+            }
+          });
+        });
+      }
+
+      for (const btn of qsa('[data-output-delete]')) {
+        btn.addEventListener('click', () => {
+          const rawIndex = btn.getAttribute('data-output-delete') || '';
+          const index = Number(rawIndex);
+          if (!Number.isInteger(index) || index < 0) return;
+          const outputs = Array.isArray(context.node.outputs) ? context.node.outputs : [];
+          outputs.splice(index, 1);
+          context.node.outputs = outputs;
+          renderWorkflowProps();
+        });
+      }
+
+      const addBtn = qs('#workflowAddOutputBtn');
+      if (addBtn) {
+        addBtn.addEventListener('click', () => {
+          const outputs = Array.isArray(context.node.outputs) ? context.node.outputs : [];
+          outputs.push({ src: '', name: '', pos: 'flow', cvt: '' });
+          context.node.outputs = outputs;
+          renderWorkflowProps();
+        });
+      }
+    }
+
+    function renderKeyValueRows(obj, nodeRefKeys, options = {}) {
+      const values = obj || {};
+      const declarationInputs = Array.isArray(options.declarationInputs) ? options.declarationInputs : [];
+      const editable = !!options.editable;
+      const kind = options.kind || '';
+      const flow = options.flow || null;
+      const node = options.node || null;
+
+      const declaredNames = new Set(declarationInputs.map((field) => field.name).filter(Boolean));
+      const extras = Object.keys(values).filter((name) => !declaredNames.has(name));
+      const hasDeclaration = declarationInputs.length > 0;
+      if (!hasDeclaration && extras.length === 0) {
         return '<tr><td colspan="2" class="mono">(空)</td></tr>';
       }
-      return entries.map(([key, value]) => {
+
+      const rows = [];
+      for (const field of declarationInputs) {
+        const key = field.name || '';
+        if (!key) continue;
+        const value = values[key] ?? field.default ?? '';
         const isNodeRef = nodeRefKeys && nodeRefKeys.has(key);
-        const valHtml = isNodeRef
-          ? `<span class="prop-node-ref-tag">node</span><span class="mono">${escapeHtml(valueToDisplayText(value))}</span>`
-          : `<span class="mono">${escapeHtml(valueToDisplayText(value))}</span>`;
-        return `<tr><th>${escapeHtml(key)}</th><td>${valHtml}</td></tr>`;
-      }).join('');
+        if (editable && kind && flow && node) {
+          const editor = resolveFieldEditorType(field, flow, node.node_id || '');
+          const optionsJson = escapeHtml(JSON.stringify(editor.options || []));
+          const displayValue = valueToDisplayText(value) || '-';
+          const nodeRefTag = isNodeRef ? '<span class="prop-node-ref-tag">node</span>' : '';
+          rows.push(`<tr><th>${requiredLabel(key, !!field.required)}</th><td>${nodeRefTag}<span class="mono workflow-inline-edit-cell editable" data-contract-inline-kind="${escapeHtml(kind)}" data-contract-inline-field="${escapeHtml(key)}" data-contract-inline-type="${escapeHtml(editor.type)}" data-contract-inline-options="${optionsJson}">${escapeHtml(displayValue)}</span></td></tr>`);
+        } else {
+          const valHtml = isNodeRef
+            ? `<span class="prop-node-ref-tag">node</span><span class="mono">${escapeHtml(valueToDisplayText(value))}</span>`
+            : `<span class="mono">${escapeHtml(valueToDisplayText(value))}</span>`;
+          rows.push(`<tr><th>${requiredLabel(key, !!field.required)}</th><td>${valHtml}</td></tr>`);
+        }
+      }
+
+      for (const key of extras) {
+        const value = values[key];
+        if (editable && kind) {
+          rows.push(`<tr><th>${requiredLabel(key, false)}</th><td><span class="mono workflow-inline-edit-cell editable" data-contract-inline-kind="${escapeHtml(kind)}" data-contract-inline-field="${escapeHtml(key)}" data-contract-inline-type="text" data-contract-inline-options="[]">${escapeHtml(valueToDisplayText(value) || '-')}</span></td></tr>`);
+        } else {
+          const isNodeRef = nodeRefKeys && nodeRefKeys.has(key);
+          const valHtml = isNodeRef
+            ? `<span class="prop-node-ref-tag">node</span><span class="mono">${escapeHtml(valueToDisplayText(value))}</span>`
+            : `<span class="mono">${escapeHtml(valueToDisplayText(value))}</span>`;
+          rows.push(`<tr><th>${requiredLabel(key, false)}</th><td>${valHtml}</td></tr>`);
+        }
+      }
+
+      if (rows.length === 0) {
+        return '<tr><td colspan="2" class="mono">(空)</td></tr>';
+      }
+      return rows.join('');
     }
 
     async function ensureLogin() {
@@ -722,7 +1009,8 @@
       layout.classList.toggle('prop-collapsed', !!workflowWorkspaceData.propCollapsed);
       const toggleBtn = qs('#workflowPropToggleBtn');
       if (toggleBtn) {
-        toggleBtn.textContent = workflowWorkspaceData.propCollapsed ? '显示属性窗格' : '隐藏属性窗格';
+        toggleBtn.title = workflowWorkspaceData.propCollapsed ? '显示属性窗格' : '隐藏属性窗格';
+        toggleBtn.setAttribute('aria-label', toggleBtn.title);
       }
     }
 
@@ -765,6 +1053,461 @@
       });
     }
 
+    function getFlowByGroupKey(flow, flowKey) {
+      if (!flow || !flowKey) return null;
+      if (flowKey === 'main') return flow;
+      const parts = flowKey.split('.').slice(1);
+      let cursor = flow;
+      for (const part of parts) {
+        const index = Number(part);
+        if (!Number.isInteger(index) || index < 0) return null;
+        const subFlows = cursor.sub_flows || [];
+        cursor = subFlows[index];
+        if (!cursor) return null;
+      }
+      return cursor;
+    }
+
+    function getSelectedNodeContext(flow = workflowWorkspaceData.flow, selectedNodeKey = workflowWorkspaceData.selectedNodeKey) {
+      if (!flow || !selectedNodeKey) return null;
+      const sep = selectedNodeKey.indexOf('::');
+      if (sep <= 0) return null;
+      const flowKey = selectedNodeKey.slice(0, sep);
+      const nodeId = selectedNodeKey.slice(sep + 2);
+      const targetFlow = getFlowByGroupKey(flow, flowKey);
+      if (!targetFlow) return null;
+      const nodes = targetFlow.nodes || [];
+      const index = nodes.findIndex((item) => item.node_id === nodeId);
+      if (index < 0) return null;
+      const groups = collectFlowGroups(flow);
+      const group = groups.find((item) => item.flowKey === flowKey) || null;
+      return {
+        flowKey,
+        flow: targetFlow,
+        group,
+        index,
+        node: nodes[index],
+      };
+    }
+
+    function getWorkflowDraftFlow() {
+      return workflowWorkspaceData.editMode ? workflowWorkspaceData.editFlow : workflowWorkspaceData.flow;
+    }
+
+    function startWorkflowEditMode() {
+      if (!workflowWorkspaceData.flow) return;
+      workflowWorkspaceData.editMode = true;
+      workflowWorkspaceData.editFlow = deepClone(workflowWorkspaceData.flow);
+      renderWorkflowWorkspace();
+    }
+
+    function cancelWorkflowEditMode() {
+      workflowWorkspaceData.editMode = false;
+      workflowWorkspaceData.editFlow = null;
+      renderWorkflowWorkspace();
+    }
+
+    function renderEditableCell(value, path, type = 'text', options = []) {
+      const display = type === 'json-object' || type === 'json-array'
+        ? prettyJson(value, type === 'json-array' ? [] : {})
+        : valueToDisplayText(value);
+      const escapedDisplay = escapeHtml(display || '-');
+      if (!workflowWorkspaceData.editMode) {
+        return `<span class="mono">${escapedDisplay}</span>`;
+      }
+      const optionsPayload = escapeHtml(JSON.stringify(options || []));
+      return `<span class="mono workflow-inline-edit-cell editable" data-edit-path="${escapeHtml(path)}" data-edit-type="${escapeHtml(type)}" data-edit-options="${optionsPayload}">${escapedDisplay}</span>`;
+    }
+
+    function applyWorkflowFieldEdit(path, rawText, type = 'text') {
+      const flow = getWorkflowDraftFlow();
+      if (!flow || !workflowWorkspaceData.editMode) return { changed: false };
+      if (path.startsWith('flow.')) {
+        const field = path.slice(5);
+        if (field === 'display_name') {
+          flow.name = String(rawText ?? '').trim();
+          return { changed: true };
+        }
+        if (field === 'name' || field === 'description' || field === 'start_node_id' || field === 'log') {
+          flow[field] = String(rawText ?? '').trim();
+          return { changed: true };
+        }
+        return { changed: false };
+      }
+
+      if (path.startsWith('node.')) {
+        const context = getSelectedNodeContext(flow, workflowWorkspaceData.selectedNodeKey);
+        if (!context) throw new Error('当前节点不存在');
+        const node = context.node;
+        const field = path.slice(5);
+        if (field === 'node_id') {
+          const nextNodeId = String(rawText ?? '').trim();
+          if (!nextNodeId) throw new Error('node_id 不能为空');
+          if (context.flow.nodes.some((item, idx) => idx !== context.index && item.node_id === nextNodeId)) {
+            throw new Error(`节点 ID 已存在: ${nextNodeId}`);
+          }
+          const oldNodeId = node.node_id || '';
+          node.node_id = nextNodeId;
+          if ((context.flow.start_node_id || '') === oldNodeId) {
+            context.flow.start_node_id = nextNodeId;
+          }
+          workflowWorkspaceData.selectedNodeKey = `${context.flowKey}::${nextNodeId}`;
+          return { changed: true };
+        }
+        if (field === 'name' || field === 'description' || field === 'action' || field === 'control' || field === 'log') {
+          node[field] = String(rawText ?? '').trim();
+          return { changed: true };
+        }
+        if (field === 'inputs') {
+          node.inputs = parseObjectJson('inputs', rawText, {});
+          return { changed: true };
+        }
+        if (field === 'params') {
+          node.params = parseObjectJson('params', rawText, {});
+          return { changed: true };
+        }
+        if (field === 'outputs') {
+          node.outputs = parseArrayJson('outputs', rawText, []);
+          return { changed: true };
+        }
+      }
+
+      return { changed: false };
+    }
+
+    function bindWorkflowInlineEditors() {
+      if (!workflowWorkspaceData.editMode) return;
+      for (const cell of qsa('[data-edit-path]')) {
+        cell.addEventListener('dblclick', () => {
+          if (!(cell instanceof HTMLElement)) return;
+          if (cell.getAttribute('data-editing') === '1') return;
+          const path = cell.getAttribute('data-edit-path') || '';
+          const type = cell.getAttribute('data-edit-type') || 'text';
+          const optionsJson = cell.getAttribute('data-edit-options') || '[]';
+          if (!path) return;
+          const initialText = cell.textContent || '';
+          let options = [];
+          try {
+            options = JSON.parse(optionsJson);
+          } catch {
+            options = [];
+          }
+          cell.setAttribute('data-editing', '1');
+          const useTextarea = type === 'json-object' || type === 'json-array' || initialText.length > 80;
+          const useSelect = type === 'select';
+          const useNumber = type === 'number';
+          cell.innerHTML = `
+            <div class="workflow-inline-editor">
+              ${useSelect
+                ? `<select class="mono">${(options || []).map((option) => {
+                  const text = String(option ?? '');
+                  const selected = text === (initialText === '-' ? '' : initialText) ? 'selected' : '';
+                  return `<option value="${escapeHtml(text)}" ${selected}>${escapeHtml(text || '(空)')}</option>`;
+                }).join('')}</select>`
+                : useNumber
+                  ? `<input class="mono" type="number" value="${escapeHtml(initialText === '-' ? '' : initialText)}" />`
+                  : useTextarea
+                ? `<textarea class="mono" rows="6">${escapeHtml(initialText === '-' ? '' : initialText)}</textarea>`
+                : `<input class="mono" value="${escapeHtml(initialText === '-' ? '' : initialText)}" />`}
+            </div>
+          `;
+
+          const input = cell.querySelector('input, textarea, select');
+          if (input instanceof HTMLElement) input.focus();
+
+          let closed = false;
+          const closeEditor = (apply, rollback = false) => {
+            if (closed) return;
+            closed = true;
+            if (!apply || rollback) {
+              renderWorkflowWorkspace();
+              return;
+            }
+            try {
+              const nextValue = (cell.querySelector('input, textarea, select')?.value || '').trim();
+              const result = applyWorkflowFieldEdit(path, nextValue, type);
+              if (!result.changed) {
+                renderWorkflowWorkspace();
+                return;
+              }
+              renderWorkflowWorkspace();
+            } catch (err) {
+              alert(err.message || '字段修改失败');
+              renderWorkflowWorkspace();
+            }
+          };
+
+          const editor = cell.querySelector('input, textarea, select');
+          if (editor instanceof HTMLSelectElement) {
+            editor.addEventListener('change', () => closeEditor(true));
+            editor.addEventListener('blur', () => closeEditor(true));
+            return;
+          }
+          if (editor instanceof HTMLInputElement || editor instanceof HTMLTextAreaElement) {
+            editor.addEventListener('blur', () => closeEditor(true));
+            editor.addEventListener('keydown', (event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeEditor(false, true);
+                return;
+              }
+              if (editor instanceof HTMLInputElement && event.key === 'Enter') {
+                event.preventDefault();
+                closeEditor(true);
+                return;
+              }
+              if (editor instanceof HTMLTextAreaElement && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                closeEditor(true);
+              }
+            });
+          }
+        });
+      }
+    }
+
+    function bindContractFieldEditors() {
+      if (!workflowWorkspaceData.editMode) return;
+      for (const token of qsa('[data-contract-inline-kind][data-contract-inline-field]')) {
+        token.addEventListener('dblclick', () => {
+          if (!(token instanceof HTMLElement)) return;
+          if (token.getAttribute('data-editing') === '1') return;
+          const kind = token.getAttribute('data-contract-inline-kind') || '';
+          const field = token.getAttribute('data-contract-inline-field') || '';
+          const editorType = token.getAttribute('data-contract-inline-type') || 'text';
+          const optionsJson = token.getAttribute('data-contract-inline-options') || '[]';
+          if (!kind || !field) return;
+
+          const flow = getWorkflowDraftFlow();
+          const context = getSelectedNodeContext(flow, workflowWorkspaceData.selectedNodeKey);
+          if (!context?.node) return;
+          const target = kind === 'action' ? (context.node.inputs || {}) : (context.node.params || {});
+          const current = valueToDisplayText(target[field] ?? '');
+
+          let options = [];
+          try {
+            options = JSON.parse(optionsJson);
+          } catch {
+            options = [];
+          }
+
+          token.setAttribute('data-editing', '1');
+          if (editorType === 'select') {
+            token.innerHTML = `<select class="workflow-edit-input mono">${options.map((option) => {
+              const text = String(option ?? '');
+              const selected = text === current ? 'selected' : '';
+              return `<option value="${escapeHtml(text)}" ${selected}>${escapeHtml(text || '(空)')}</option>`;
+            }).join('')}</select>`;
+            const select = token.querySelector('select');
+            if (!(select instanceof HTMLSelectElement)) return;
+            select.focus();
+            const commit = () => {
+              const value = (select.value || '').trim();
+              if (!value) delete target[field];
+              else target[field] = value;
+              if (kind === 'action') context.node.inputs = target;
+              else context.node.params = target;
+              renderWorkflowProps();
+            };
+            select.addEventListener('change', commit);
+            select.addEventListener('blur', commit);
+            return;
+          }
+
+          const inputType = editorType === 'number' ? 'number' : 'text';
+          token.innerHTML = `<input type="${inputType}" class="workflow-edit-input mono" value="${escapeHtml(current)}" />`;
+          const input = token.querySelector('input');
+          if (!(input instanceof HTMLInputElement)) return;
+          input.focus();
+          const commit = (rollback = false) => {
+            if (!rollback) {
+              const value = (input.value || '').trim();
+              if (!value) delete target[field];
+              else target[field] = value;
+              if (kind === 'action') context.node.inputs = target;
+              else context.node.params = target;
+            }
+            renderWorkflowProps();
+          };
+          input.addEventListener('blur', () => commit(false));
+          input.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              commit(true);
+              return;
+            }
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commit(false);
+            }
+          });
+        });
+      }
+    }
+
+    async function saveWorkflowFlow(nextFlow, nextSelectedNodeKey = '') {
+      const workflow = workflowWorkspaceData.selectedWorkflow;
+      if (!workflow || !nextFlow) {
+        throw new Error('请先选择 workflow');
+      }
+      const data = await request(`/panel/api/workflows/${encodeURIComponent(workflow)}`, 'PUT', { flow: nextFlow });
+      workflowWorkspaceData.flow = data.flow || nextFlow;
+      workflowWorkspaceData.flowPath = data.path || workflowWorkspaceData.flowPath;
+      const allNodes = flattenFlowNodes(workflowWorkspaceData.flow);
+      const hasSelected = allNodes.some((item) => item.key === nextSelectedNodeKey);
+      workflowWorkspaceData.selectedNodeKey = hasSelected ? nextSelectedNodeKey : '';
+      renderWorkflowWorkspace();
+      showCopyToast('workflow 已保存');
+    }
+
+    async function saveWorkflowEditMode() {
+      const flow = getWorkflowDraftFlow();
+      if (!flow || !workflowWorkspaceData.editMode) {
+        return;
+      }
+      await saveWorkflowFlow(flow, workflowWorkspaceData.selectedNodeKey || '');
+      workflowWorkspaceData.editMode = false;
+      workflowWorkspaceData.editFlow = null;
+      renderWorkflowWorkspace();
+    }
+
+    function requireEditableFlow() {
+      if (!workflowWorkspaceData.editMode) {
+        alert('请先点击进入编辑');
+        return null;
+      }
+      const flow = getWorkflowDraftFlow();
+      if (!flow) {
+        alert('请先选择 workflow');
+        return null;
+      }
+      return flow;
+    }
+
+    async function addWorkflowNode(targetKey = 'main') {
+      const workingFlow = requireEditableFlow();
+      if (!workingFlow) return;
+      const defaultId = `node_${Date.now().toString().slice(-6)}`;
+      const nodeId = (window.prompt('输入新节点 node_id', defaultId) || '').trim();
+      if (!nodeId) return;
+      const nodeName = (window.prompt('输入节点名称（可选）', nodeId) || '').trim();
+      const actionName = (window.prompt('输入 action（可选，例如 builtin.OpenPage）', '') || '').trim();
+      const controlName = (window.prompt('输入 control（可选，例如 builtin.NextNode）', 'builtin.NextNode') || '').trim();
+
+      const targetFlow = getFlowByGroupKey(workingFlow, targetKey);
+      if (!targetFlow) {
+        alert('目标流程不存在');
+        return;
+      }
+
+      const nodes = targetFlow.nodes || [];
+      if (nodes.some((item) => item.node_id === nodeId)) {
+        alert(`节点 ID 已存在: ${nodeId}`);
+        return;
+      }
+
+      nodes.push({
+        node_id: nodeId,
+        name: nodeName,
+        description: '',
+        action: actionName,
+        inputs: {},
+        outputs: [],
+        control: controlName,
+        params: {},
+        log: 'short',
+      });
+      targetFlow.nodes = nodes;
+      if (!targetFlow.start_node_id) {
+        targetFlow.start_node_id = nodeId;
+      }
+
+      workflowWorkspaceData.selectedNodeKey = `${targetKey}::${nodeId}`;
+      renderWorkflowWorkspace();
+    }
+
+    async function deleteSelectedNode(flowOverride = null) {
+      const workingFlow = flowOverride || requireEditableFlow();
+      if (!workingFlow) return;
+
+      const context = getSelectedNodeContext(workingFlow, workflowWorkspaceData.selectedNodeKey);
+      if (!context) {
+        alert('请先选择节点');
+        return;
+      }
+      const nodeName = context.node.name || context.node.node_id;
+      if (!window.confirm(`确认删除节点 ${nodeName}?`)) return;
+
+      const targetFlow = getFlowByGroupKey(workingFlow, context.flowKey);
+      if (!targetFlow) {
+        alert('节点所在流程不存在');
+        return;
+      }
+      const nodes = targetFlow.nodes || [];
+      const removed = nodes.splice(context.index, 1)[0];
+      targetFlow.nodes = nodes;
+      if (removed && targetFlow.start_node_id === removed.node_id) {
+        targetFlow.start_node_id = nodes[0]?.node_id || '';
+      }
+
+      workflowWorkspaceData.selectedNodeKey = '';
+      renderWorkflowWorkspace();
+    }
+
+    function restoreSelectedNodeDraft() {
+      if (!workflowWorkspaceData.editMode || !workflowWorkspaceData.flow) {
+        return;
+      }
+      const draftFlow = getWorkflowDraftFlow();
+      const context = getSelectedNodeContext(draftFlow, workflowWorkspaceData.selectedNodeKey);
+      if (!context) {
+        alert('请先选择节点');
+        return;
+      }
+
+      const sourceFlow = getFlowByGroupKey(workflowWorkspaceData.flow, context.flowKey);
+      const sourceNode = sourceFlow?.nodes?.[context.index] || null;
+      if (!sourceNode) {
+        const nodes = context.flow.nodes || [];
+        nodes.splice(context.index, 1);
+        context.flow.nodes = nodes;
+        workflowWorkspaceData.selectedNodeKey = '';
+        renderWorkflowWorkspace();
+        return;
+      }
+
+      const nextNode = deepClone(sourceNode);
+      context.flow.nodes[context.index] = nextNode;
+      workflowWorkspaceData.selectedNodeKey = `${context.flowKey}::${nextNode.node_id || ''}`;
+      renderWorkflowWorkspace();
+    }
+
+    async function deleteCurrentWorkflow() {
+      const workflow = workflowWorkspaceData.selectedWorkflow;
+      if (!workflow) {
+        alert('请先选择 workflow');
+        return;
+      }
+      if (!window.confirm(`确认删除 workflow ${workflow} ?`)) return;
+      await request(`/panel/api/workflows/${encodeURIComponent(workflow)}`, 'DELETE');
+      showCopyToast(`已删除 workflow: ${workflow}`);
+      await refreshWorkflowWorkspace();
+    }
+
+    function updateWorkflowToolbarState() {
+      const hasWorkflow = !!workflowWorkspaceData.selectedWorkflow;
+      const editBtn = qs('#workflowEditBtn');
+      const cancelBtn = qs('#workflowCancelEditBtn');
+      const saveBtn = qs('#workflowSaveBtn');
+      const deleteWorkflowBtn = qs('#workflowDeleteBtn');
+      const createTaskBtn = qs('#workflowCreateTaskBtn');
+      if (editBtn) editBtn.disabled = !hasWorkflow || workflowWorkspaceData.editMode;
+      if (cancelBtn) cancelBtn.disabled = !hasWorkflow || !workflowWorkspaceData.editMode;
+      if (saveBtn) saveBtn.disabled = !hasWorkflow || !workflowWorkspaceData.editMode;
+      if (deleteWorkflowBtn) deleteWorkflowBtn.disabled = !hasWorkflow;
+      if (createTaskBtn) createTaskBtn.disabled = !hasWorkflow || workflowWorkspaceData.editMode;
+    }
+
     function renderWorkflowNav() {
       const nav = qs('#workflowNav');
       const items = workflowWorkspaceData.workflowItems || [];
@@ -797,7 +1540,7 @@
       const createBtn = qs('#workflowCreateTaskBtn');
       if (!canvas) return;
 
-      const flow = workflowWorkspaceData.flow;
+      const flow = getWorkflowDraftFlow();
       const groups = collectFlowGroups(flow);
       const allNodes = flattenFlowNodes(flow);
       if (createBtn) createBtn.disabled = !workflowWorkspaceData.selectedWorkflow;
@@ -832,7 +1575,12 @@
             <div class="workflow-flow-group">
               <div class="workflow-flow-group-head">
                 <span class="workflow-flow-group-title">${escapeHtml(group.flowLabel)}</span>
-                <span class="workflow-flow-group-count">${(group.nodes || []).length} 节点</span>
+                <div class="workflow-flow-group-actions">
+                  <span class="workflow-flow-group-count">${(group.nodes || []).length} 节点</span>
+                  <button class="workflow-flow-add-btn" data-flow-add-node="${escapeHtml(group.flowKey)}" title="在此流程添加节点" aria-label="在此流程添加节点" ${workflowWorkspaceData.editMode ? '' : 'disabled'}>
+                    <span class="font-icon" aria-hidden="true">＋</span>
+                  </button>
+                </div>
               </div>
               <div class="workflow-node-grid">${groupNodes || '<div class="placeholder">该流程没有节点。</div>'}</div>
             </div>
@@ -845,6 +1593,14 @@
         btn.addEventListener('click', () => {
           const nodeKey = btn.getAttribute('data-workflow-node-key') || '';
           selectWorkflowNode(nodeKey);
+        });
+      }
+
+      for (const btn of qsa('[data-flow-add-node]')) {
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const flowKey = btn.getAttribute('data-flow-add-node') || 'main';
+          addWorkflowNode(flowKey).catch(err => alert(err.message || '添加节点失败'));
         });
       }
 
@@ -863,7 +1619,7 @@
       const prop = qs('#workflowProp');
       if (!prop) return;
 
-      const flow = workflowWorkspaceData.flow;
+      const flow = getWorkflowDraftFlow();
       if (!flow) {
         prop.innerHTML = '<div class="placeholder">暂无属性内容。</div>';
         return;
@@ -871,25 +1627,27 @@
 
       const nodes = flattenFlowNodes(flow);
       const selectedNodeWithMeta = nodes.find((item) => item.key === workflowWorkspaceData.selectedNodeKey) || null;
-      const selectedNode = selectedNodeWithMeta?.node || null;
-      const selectedGroup = selectedNodeWithMeta?.group || null;
+      const selectedContext = getSelectedNodeContext(flow, workflowWorkspaceData.selectedNodeKey);
+      const selectedNode = selectedContext?.node || selectedNodeWithMeta?.node || null;
+      const selectedGroup = selectedContext?.group || selectedNodeWithMeta?.group || null;
+      const selectedFlow = selectedContext?.flow || null;
       if (!selectedNode) {
         const workflowMeta = getWorkflowDisplayItem(workflowWorkspaceData.selectedWorkflow);
         const subflowCount = (flow.sub_flows || []).length;
         prop.innerHTML = `
           <div class="workflow-prop-head">
             <div class="workflow-prop-title">Flow 属性</div>
-            <div class="k">当前未选中节点。</div>
+            <div class="k">${workflowWorkspaceData.editMode ? '编辑模式' : '当前未选中节点。'}</div>
           </div>
           <div class="workflow-prop-block">
             <table class="workflow-prop-table">
               <tbody>
                 <tr><th>workflow</th><td class="mono">${escapeHtml(workflowMeta.workflow || '-')}</td></tr>
-                <tr><th>display_name</th><td>${escapeHtml(workflowMeta.name || '-')}</td></tr>
-                <tr><th>flow_id</th><td class="mono">${escapeHtml(flow.flow_id || '-')}</td></tr>
-                <tr><th>name</th><td>${escapeHtml(flow.name || '-')}</td></tr>
-                <tr><th>description</th><td>${escapeHtml(flow.description || '-')}</td></tr>
-                <tr><th>start_node_id</th><td class="mono">${escapeHtml(flow.start_node_id || '-')}</td></tr>
+                <tr><th>${requiredLabel('display_name', true)}</th><td>${renderEditableCell(flow.name || workflowMeta.name || '', 'flow.display_name')}</td></tr>
+                <tr><th>${requiredLabel('flow_id', true)}</th><td class="mono">${escapeHtml(flow.flow_id || '-')}</td></tr>
+                <tr><th>description</th><td>${renderEditableCell(flow.description || '', 'flow.description')}</td></tr>
+                <tr><th>${requiredLabel('start_node_id', true)}</th><td>${renderEditableCell(flow.start_node_id || '', 'flow.start_node_id')}</td></tr>
+                <tr><th>log</th><td>${renderEditableCell(flow.log || 'short', 'flow.log', 'select', ['none', 'short', 'full'])}</td></tr>
                 <tr><th>total_nodes</th><td>${nodes.length}</td></tr>
                 <tr><th>sub_flows</th><td>${subflowCount}</td></tr>
                 <tr><th>path</th><td class="mono">${escapeHtml(workflowWorkspaceData.flowPath || '-')}</td></tr>
@@ -897,22 +1655,14 @@
             </table>
           </div>
         `;
+        bindWorkflowInlineEditors();
         return;
       }
 
       const actionName = selectedNode.action || '';
       const controlName = selectedNode.control || '';
-      const outputItems = selectedNode.outputs || [];
-      const outputSection = outputItems.length > 0
-        ? `
-            <div class="contract-section-title">outputs</div>
-            <table class="workflow-prop-table"><tbody>
-              ${outputItems.map((item) => `
-                <tr><th>${escapeHtml(item.name || item.src || '-')}</th><td class="mono">${escapeHtml(`src=${item.src || '-'}, pos=${item.pos || '-'}, cvt=${item.cvt || '-'}`)}</td></tr>
-              `).join('')}
-            </tbody></table>
-          `
-        : '';
+      const actionOptions = Array.from(new Set([...listCatalogTypes('action'), actionName].filter(Boolean))).sort((a, b) => a.localeCompare(b));
+      const controlOptions = Array.from(new Set([...listCatalogTypes('control'), controlName].filter(Boolean))).sort((a, b) => a.localeCompare(b));
       const actionSection = actionName
         ? `
           <div class="workflow-prop-block workflow-component workflow-component--action">
@@ -922,12 +1672,23 @@
             </div>
             <table class="workflow-prop-table">
               <tbody>
-                <tr><th>type</th><td class="mono">${escapeHtml(actionName)}</td></tr>
+                <tr><th>${requiredLabel('type', true)}</th><td>${renderEditableCell(actionName, 'node.action', 'select', actionOptions)}
+                </td></tr>
               </tbody>
             </table>
             <div class="contract-section-title">inputs</div>
-            <table class="workflow-prop-table"><tbody>${renderKeyValueRows(selectedNode.inputs || {})}</tbody></table>
-            ${outputSection}
+            <table class="workflow-prop-table"><tbody>${renderKeyValueRows(selectedNode.inputs || {}, null, {
+              declarationInputs: findActionDeclaration(actionName)?.inputs || [],
+              editable: workflowWorkspaceData.editMode,
+              kind: 'action',
+              flow: selectedFlow,
+              node: selectedNode,
+            })}</tbody></table>
+            <div class="contract-section-title">outputs</div>
+            ${workflowWorkspaceData.editMode
+              ? '<div class="workflow-edit-actions"><button class="ghost icon-only" type="button" id="workflowAddOutputBtn" title="添加输出项" aria-label="添加输出项"><span class="font-icon" aria-hidden="true">＋</span></button></div>'
+              : ''}
+            ${renderOutputsRows(selectedNode)}
           </div>
         `
         : `
@@ -936,7 +1697,9 @@
               <div class="workflow-component-title">Action 组件</div>
               <span class="workflow-component-kind">Action</span>
             </div>
-            <div class="placeholder">该节点未挂载 Action 组件。</div>
+            ${workflowWorkspaceData.editMode
+              ? `<table class="workflow-prop-table"><tbody><tr><th>${requiredLabel('type', true)}</th><td>${renderEditableCell(actionName, 'node.action', 'select', ['', ...actionOptions])}</td></tr></tbody></table>`
+              : '<div class="placeholder">该节点未挂载 Action 组件。</div>'}
           </div>
         `;
 
@@ -949,11 +1712,18 @@
             </div>
             <table class="workflow-prop-table">
               <tbody>
-                <tr><th>type</th><td class="mono">${escapeHtml(controlName)}</td></tr>
+                <tr><th>${requiredLabel('type', true)}</th><td>${renderEditableCell(controlName, 'node.control', 'select', controlOptions)}
+                </td></tr>
               </tbody>
             </table>
             <div class="contract-section-title">params</div>
-            <table class="workflow-prop-table"><tbody>${renderKeyValueRows(selectedNode.params || {}, resolveNodeRefParamKeys(controlName))}</tbody></table>
+            <table class="workflow-prop-table"><tbody>${renderKeyValueRows(selectedNode.params || {}, resolveNodeRefParamKeys(controlName), {
+              declarationInputs: findControlDeclaration(controlName)?.inputs || [],
+              editable: workflowWorkspaceData.editMode,
+              kind: 'control',
+              flow: selectedFlow,
+              node: selectedNode,
+            })}</tbody></table>
           </div>
         `
         : `
@@ -962,34 +1732,56 @@
               <div class="workflow-component-title">Control 组件</div>
               <span class="workflow-component-kind">Control</span>
             </div>
-            <div class="placeholder">该节点未挂载 Control 组件。</div>
+            ${workflowWorkspaceData.editMode
+              ? `<table class="workflow-prop-table"><tbody><tr><th>${requiredLabel('type', true)}</th><td>${renderEditableCell(controlName, 'node.control', 'select', ['', ...controlOptions])}</td></tr></tbody></table>`
+              : '<div class="placeholder">该节点未挂载 Control 组件。</div>'}
           </div>
         `;
 
       prop.innerHTML = `
         <div class="workflow-prop-head">
           <div class="workflow-prop-title">节点属性</div>
-          <div class="k">${escapeHtml(selectedNode.name || selectedNode.node_id || '-')}</div>
+          <div class="k">${workflowWorkspaceData.editMode ? '编辑模式' : escapeHtml(selectedNode.name || selectedNode.node_id || '-')}</div>
         </div>
         <div class="workflow-prop-block">
           <table class="workflow-prop-table">
             <tbody>
-              <tr><th>node_id</th><td class="mono">${escapeHtml(selectedNode.node_id || '-')}</td></tr>
-              <tr><th>name</th><td>${escapeHtml(selectedNode.name || '-')}</td></tr>
-              <tr><th>description</th><td>${escapeHtml(selectedNode.description || '-')}</td></tr>
-              <tr><th>flow_group</th><td>${escapeHtml(selectedGroup?.flowLabel || '-')}</td></tr>
+              <tr><th>${requiredLabel('node_id', true)}</th><td>${renderEditableCell(selectedNode.node_id || '', 'node.node_id')}</td></tr>
+              <tr><th>${requiredLabel('name', true)}</th><td>${renderEditableCell(selectedNode.name || '', 'node.name')}</td></tr>
+              <tr><th>description</th><td>${renderEditableCell(selectedNode.description || '', 'node.description')}</td></tr>
+              <tr><th>log</th><td>${renderEditableCell(selectedNode.log || 'short', 'node.log')}</td></tr>
+              <tr><th>flow_group</th><td class="mono">${escapeHtml(selectedGroup?.flowLabel || '-')}</td></tr>
               <tr><th>flow_id</th><td class="mono">${escapeHtml(selectedGroup?.flowId || '-')}</td></tr>
-              <tr><th>log</th><td class="mono">${escapeHtml(selectedNode.log || '-')}</td></tr>
             </tbody>
           </table>
+          ${workflowWorkspaceData.editMode ? '<div class="workflow-edit-actions"><button class="ghost" id="workflowRestoreNodeBtn" title="恢复当前节点" aria-label="恢复当前节点"><span class="font-icon" aria-hidden="true">↺</span></button><button class="danger" id="workflowDeleteNodeBtn" title="删除当前节点" aria-label="删除当前节点"><span class="font-icon" aria-hidden="true">🗑</span></button></div>' : ''}
         </div>
         ${actionSection}
         ${controlSection}
       `;
+
+      const restoreNodeBtn = qs('#workflowRestoreNodeBtn');
+      if (restoreNodeBtn) {
+        restoreNodeBtn.addEventListener('click', () => {
+          restoreSelectedNodeDraft();
+        });
+      }
+
+      const deleteNodeBtn = qs('#workflowDeleteNodeBtn');
+      if (deleteNodeBtn) {
+        deleteNodeBtn.addEventListener('click', () => {
+          deleteSelectedNode().catch(err => alert(err.message || '删除节点失败'));
+        });
+      }
+
+      bindWorkflowInlineEditors();
+      bindContractFieldEditors();
+      bindOutputEditors();
     }
 
     function renderWorkflowWorkspace() {
       updateWorkflowLayoutState();
+      updateWorkflowToolbarState();
       renderWorkflowNav();
       renderWorkflowCanvas();
       renderWorkflowProps();
@@ -999,13 +1791,28 @@
       const data = await request(`/panel/api/workflows/${encodeURIComponent(name)}`);
       workflowWorkspaceData.selectedWorkflow = name;
       workflowWorkspaceData.flow = data.flow || null;
+      workflowWorkspaceData.editFlow = null;
+      workflowWorkspaceData.editMode = false;
       workflowWorkspaceData.flowPath = data.path || '';
       const nodes = flattenFlowNodes(workflowWorkspaceData.flow);
       const hasSelected = nodes.some((item) => item.key === workflowWorkspaceData.selectedNodeKey);
       workflowWorkspaceData.selectedNodeKey = hasSelected ? workflowWorkspaceData.selectedNodeKey : '';
     }
 
+    async function ensureWorkflowCatalogReady() {
+      if (Array.isArray(pluginCatalogData.items) && pluginCatalogData.items.length > 0) {
+        return;
+      }
+      try {
+        const data = await request('/panel/api/plugins');
+        pluginCatalogData = data;
+      } catch {
+        // 插件目录失败时允许 workflow 基础查看，编辑能力降级为非契约模式。
+      }
+    }
+
     async function refreshWorkflowWorkspace() {
+      await ensureWorkflowCatalogReady();
       const data = await request('/panel/api/workflows');
       const items = data.items || [];
       const workflowItems = data.workflows || items.map((item) => ({ workflow: item, name: item }));
@@ -1015,6 +1822,8 @@
       if (!items.length) {
         workflowWorkspaceData.selectedWorkflow = '';
         workflowWorkspaceData.flow = null;
+        workflowWorkspaceData.editFlow = null;
+        workflowWorkspaceData.editMode = false;
         workflowWorkspaceData.flowPath = '';
         workflowWorkspaceData.selectedNodeKey = '';
         renderWorkflowWorkspace();
@@ -1489,6 +2298,22 @@
 
     qs('#workflowRefreshBtn').addEventListener('click', () => {
       refreshWorkflowWorkspace().catch(err => alert(err.message));
+    });
+
+    qs('#workflowEditBtn').addEventListener('click', () => {
+      startWorkflowEditMode();
+    });
+
+    qs('#workflowCancelEditBtn').addEventListener('click', () => {
+      cancelWorkflowEditMode();
+    });
+
+    qs('#workflowSaveBtn').addEventListener('click', () => {
+      saveWorkflowEditMode().catch(err => alert(err.message || '保存 workflow 失败'));
+    });
+
+    qs('#workflowDeleteBtn').addEventListener('click', () => {
+      deleteCurrentWorkflow().catch(err => alert(err.message || '删除 workflow 失败'));
     });
 
     qs('#workflowCreateTaskBtn').addEventListener('click', () => {

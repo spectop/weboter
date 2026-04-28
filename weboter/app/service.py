@@ -16,7 +16,8 @@ from weboter.core.plugin_loader import ensure_plugins_initialized, get_plugin_sn
 from weboter.core.engine.action_manager import action_manager
 from weboter.core.engine.control_manager import control_manager
 from weboter.core.engine.excutor import Executor
-from weboter.core.workflow_io import WorkflowReader
+from weboter.core.workflow_io import WorkflowReader, WorkflowWriter
+from weboter.public.model import Flow, Node, NodeOutputConfig
 
 
 @dataclass
@@ -167,6 +168,96 @@ class WorkflowService:
             raise FileNotFoundError(f"Workflow file not found: {workflow_path}")
         workflow_path.unlink()
         return workflow_path
+
+    def _parse_node_output(self, payload: Any, *, context: str) -> NodeOutputConfig:
+        if not isinstance(payload, dict):
+            raise ValueError(f"{context} output must be an object")
+        src = str(payload.get("src", "")).strip()
+        if not src:
+            raise ValueError(f"{context} output.src is required")
+        return NodeOutputConfig(
+            src=src,
+            name=str(payload.get("name", "") or ""),
+            pos=str(payload.get("pos", "flow") or "flow"),
+            cvt=str(payload.get("cvt", "") or ""),
+        )
+
+    def _parse_node(self, payload: Any, *, context: str) -> Node:
+        if not isinstance(payload, dict):
+            raise ValueError(f"{context} must be an object")
+        node_id = str(payload.get("node_id", "")).strip()
+        if not node_id:
+            raise ValueError(f"{context}.node_id is required")
+
+        inputs = payload.get("inputs") or {}
+        if not isinstance(inputs, dict):
+            raise ValueError(f"{context}.inputs must be an object")
+        params = payload.get("params") or {}
+        if not isinstance(params, dict):
+            raise ValueError(f"{context}.params must be an object")
+        outputs_raw = payload.get("outputs") or []
+        if not isinstance(outputs_raw, list):
+            raise ValueError(f"{context}.outputs must be an array")
+
+        outputs = [
+            self._parse_node_output(item, context=f"{context}.outputs[{index}]")
+            for index, item in enumerate(outputs_raw)
+        ]
+
+        return Node(
+            node_id=node_id,
+            name=str(payload.get("name", "") or ""),
+            description=str(payload.get("description", "") or ""),
+            action=str(payload.get("action", "") or ""),
+            inputs=inputs,
+            outputs=outputs,
+            control=str(payload.get("control", "") or ""),
+            params=params,
+            log=str(payload.get("log", "short") or "short"),
+        )
+
+    def _parse_flow(self, payload: Any, *, context: str) -> Flow:
+        if not isinstance(payload, dict):
+            raise ValueError(f"{context} must be an object")
+
+        flow_id = str(payload.get("flow_id", "")).strip()
+        if not flow_id:
+            raise ValueError(f"{context}.flow_id is required")
+
+        nodes_raw = payload.get("nodes") or []
+        if not isinstance(nodes_raw, list):
+            raise ValueError(f"{context}.nodes must be an array")
+        nodes = [self._parse_node(item, context=f"{context}.nodes[{index}]") for index, item in enumerate(nodes_raw)]
+
+        node_ids: set[str] = set()
+        for node in nodes:
+            if node.node_id in node_ids:
+                raise ValueError(f"{context}.nodes contains duplicate node_id: {node.node_id}")
+            node_ids.add(node.node_id)
+
+        sub_flows_raw = payload.get("sub_flows") or []
+        if not isinstance(sub_flows_raw, list):
+            raise ValueError(f"{context}.sub_flows must be an array")
+        sub_flows = [
+            self._parse_flow(item, context=f"{context}.sub_flows[{index}]")
+            for index, item in enumerate(sub_flows_raw)
+        ]
+
+        return Flow(
+            flow_id=flow_id,
+            name=str(payload.get("name", "") or ""),
+            description=str(payload.get("description", "") or ""),
+            start_node_id=str(payload.get("start_node_id", "") or ""),
+            nodes=nodes,
+            sub_flows=sub_flows,
+            log=str(payload.get("log", "short") or "short"),
+        )
+
+    def update_workflow(self, directory: Path, workflow_name: str, flow_data: dict[str, Any]) -> Path:
+        resolution = self.resolve_from_directory(directory, workflow_name)
+        flow = self._parse_flow(flow_data, context="flow")
+        WorkflowWriter.to_json(flow, resolution.source_path, indent=2)
+        return resolution.source_path
 
     def run_workflow(self, workflow_path: Path, logger: logging.Logger | None = None, hooks: Any | None = None) -> Path:
         ensure_plugins_initialized(self.config)

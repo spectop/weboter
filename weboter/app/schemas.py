@@ -98,6 +98,10 @@ class EnvSetRequest(BaseModel):
     value: Any
 
 
+class PanelWorkflowSaveRequest(BaseModel):
+    flow: Dict[str, Any]
+
+
 class EnvImportRequest(BaseModel):
     data: dict[str, Any]
     replace: bool = False

@@ -62,6 +62,20 @@ Panel 是 Service 的 Web 管理入口，包含：
 		- `workflow`: string，workflow 逻辑名。
 		- `resolved`: string，解析后的 workflow 文件路径。
 		- `task`: object，任务对象（task_id、status、workflow_path 等）。
+- `PUT /panel/api/workflows/{workflow_name}`
+	- 用途：保存 workflow 编辑结果（包含 flow 属性、node 配置、node 新增/删除后的整体结构）。
+	- 请求关键字段：
+		- `flow`: object，Flow dataclass 的 JSON 结构（`flow_id`、`name`、`description`、`start_node_id`、`nodes`、`sub_flows`、`log`）。
+	- 返回关键字段：
+		- `workflow`: string，workflow 逻辑名。
+		- `path`: string，写回的 workflow 文件路径。
+		- `updated`: boolean，固定为 true。
+		- `flow`: object，保存后的 Flow dataclass 结构。
+- `DELETE /panel/api/workflows/{workflow_name}`
+	- 用途：删除 workflow 文件（用于 workflow 工具栏删除）。
+	- 返回关键字段：
+		- `workflow`: string，workflow 逻辑名。
+		- `deleted`: string，被删除的 workflow 文件路径。
 
 ## 3. 静态资源契约（Stable）
 

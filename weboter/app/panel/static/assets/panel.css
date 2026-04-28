@@ -836,6 +836,24 @@
       flex-wrap: wrap;
     }
 
+    .icon-only {
+      min-width: 34px;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .font-icon {
+      font-family: "Segoe UI Symbol", "Noto Sans Symbols", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+      font-size: 1rem;
+      line-height: 1;
+      font-style: normal;
+      font-weight: 600;
+    }
+
     .workflow-canvas {
       min-height: 0;
       overflow-y: auto;
@@ -861,6 +879,38 @@
       gap: 8px;
       border-bottom: 1px dashed var(--line);
       padding-bottom: 6px;
+    }
+
+    .workflow-flow-group-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .workflow-flow-add-btn {
+      min-width: 26px;
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .workflow-flow-add-btn:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: #eef8f4;
+    }
+
+    .workflow-flow-add-btn:disabled {
+      opacity: .45;
+      cursor: not-allowed;
     }
 
     .workflow-flow-group-title {
@@ -957,6 +1007,189 @@
       display: grid;
       gap: 8px;
       min-width: 0;
+    }
+
+    .workflow-edit-head {
+      font-size: .9rem;
+      font-weight: 700;
+    }
+
+    .workflow-inline-edit-cell {
+      cursor: default;
+      position: relative;
+    }
+
+    .workflow-inline-edit-cell.editable {
+      cursor: pointer;
+    }
+
+    .workflow-inline-editor {
+      display: grid;
+      gap: 6px;
+    }
+
+    .workflow-inline-editor input,
+    .workflow-inline-editor textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 8px;
+      font: inherit;
+      box-sizing: border-box;
+    }
+
+    .workflow-inline-editor textarea {
+      min-height: 88px;
+      resize: vertical;
+    }
+
+    .workflow-output-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .workflow-output-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: #fff;
+      display: grid;
+      gap: 6px;
+      position: relative;
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.01);
+    }
+
+    .workflow-output-item.editable {
+      background: #fafafa;
+      padding: 8px 36px 8px 8px;
+    }
+
+    .workflow-output-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .workflow-output-label {
+      width: 36px;
+      flex: 0 0 36px;
+      color: var(--muted);
+      font-size: .78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .02em;
+    }
+
+    .workflow-output-name {
+      display: inline-block;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1 1 auto;
+    }
+
+    .workflow-output-target-name {
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      display: inline-block;
+      vertical-align: middle;
+      flex: 1 1 auto;
+    }
+
+    .workflow-output-cvt {
+      display: inline-block;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1 1 auto;
+    }
+
+    .workflow-output-path {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+      flex: 1 1 auto;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .workflow-output-name.editable,
+    .workflow-output-target-name.editable,
+    .workflow-output-cvt.editable,
+    .workflow-output-chip.editable {
+      cursor: pointer;
+    }
+
+    .workflow-output-name .workflow-edit-input,
+    .workflow-output-target-name .workflow-edit-input,
+    .workflow-output-cvt .workflow-edit-input,
+    .workflow-output-chip .workflow-edit-input,
+    .workflow-output-chip select {
+      width: 100%;
+      min-width: 72px;
+      padding: 4px 6px;
+    }
+
+    .workflow-output-item > .icon-only {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      margin-top: 0;
+    }
+
+    .workflow-output-chip {
+      border-radius: 999px;
+      padding: 2px 8px;
+      border: 1px solid transparent;
+      font-size: .78rem;
+      line-height: 1.5;
+      flex: 0 0 auto;
+    }
+
+    .workflow-output-chip--pos {
+      color: #0f766e;
+      background: #ccfbf1;
+      border-color: #5eead4;
+    }
+
+    .workflow-edit-label {
+      font-size: .78rem;
+      color: var(--muted);
+    }
+
+    .workflow-edit-input,
+    .workflow-edit-textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 8px 10px;
+      font: inherit;
+      color: var(--ink);
+      box-sizing: border-box;
+    }
+
+    .workflow-edit-textarea {
+      resize: vertical;
+      min-height: 66px;
+    }
+
+    .workflow-edit-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
     }
 
     .workflow-component {

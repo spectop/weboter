@@ -10,7 +10,7 @@ from fastapi import FastAPI, File, HTTPException, Query, Request, Response, Uplo
 from starlette.responses import HTMLResponse
 
 from weboter.app.panel import PANEL_SESSION_COOKIE, PanelAuthManager, read_panel_asset, read_panel_html
-from weboter.app.schemas import EnvSetRequest, PanelLoginRequest
+from weboter.app.schemas import EnvSetRequest, PanelLoginRequest, PanelWorkflowSaveRequest
 from weboter.core.workflow_io import WorkflowReader
 
 
@@ -196,6 +196,31 @@ def register_panel_routes(
                 "workflow": workflow_name,
                 "resolved": str(resolution.source_path),
                 "task": asdict(task),
+            }
+        except Exception as exc:
+            raise_http_error(exc)
+
+    @app.put("/panel/api/workflows/{workflow_name:path}", tags=["panel"])
+    def panel_workflow_update(workflow_name: str, payload: PanelWorkflowSaveRequest) -> dict[str, Any]:
+        try:
+            saved_path = service.update_workflow(service.workflow_store, workflow_name, payload.flow)
+            flow = WorkflowReader.from_json(saved_path)
+            return {
+                "workflow": workflow_name,
+                "path": str(saved_path),
+                "updated": True,
+                "flow": asdict(flow),
+            }
+        except Exception as exc:
+            raise_http_error(exc)
+
+    @app.delete("/panel/api/workflows/{workflow_name:path}", tags=["panel"])
+    def panel_workflow_delete(workflow_name: str) -> dict[str, Any]:
+        try:
+            deleted_path = service.delete_workflow(service.workflow_store, workflow_name)
+            return {
+                "workflow": workflow_name,
+                "deleted": str(deleted_path),
             }
         except Exception as exc:
             raise_http_error(exc)
