@@ -92,6 +92,24 @@ Core 对外暴露两类接口：
 - 初始化时注册 builtin，并扫描目录插件 + 已安装插件。
 - `refresh_plugins` 返回加载结果与错误摘要，供 Service/MCP/Panel 消费。
 
+### 3.3 builtin 控制流能力（Evolving）
+
+文件：`weboter/builtin/basic_control.py`
+
+builtin 包提供通用控制流能力，默认至少包含：
+
+- `NextNode`：无条件跳转到指定节点。
+- `LoopUntil`：按变量值循环，支持最大重试次数与失败出口。
+- `IfElse`：按比较条件在真分支与假分支间跳转。
+- `ByMap`：按 key 从映射表选择下一节点，支持默认分支。
+- `EndFlow`：直接结束当前流程（返回 `__end__`）。
+
+约束：
+
+- 新增 builtin control 必须保持 `ControlBase` 契约不变。
+- 返回节点必须是合法节点 ID，或 `__end__` / `__exit__`。
+- 不得引入对 `app/mcp` 层的依赖。
+
 ## 4. 禁止跨层依赖
 
 - `public` 禁止依赖 `core/app/mcp` 任何实现。

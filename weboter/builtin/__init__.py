@@ -62,6 +62,9 @@ actions.extend(captcha_actions)
 controls = [
     basic_control.NextNode,
     basic_control.LoopUntil,
+    basic_control.IfElse,
+    basic_control.ByMap,
+    basic_control.EndFlow,
 ]
 
 __all__ = ["actions", "controls", "package_name"]
