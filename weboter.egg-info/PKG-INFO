@@ -17,7 +17,8 @@ Requires-Dist: paho-mqtt>=1.6.1; extra == "mqtt"
 Provides-Extra: captcha-ocr
 Requires-Dist: numpy>=2.0.0; extra == "captcha-ocr"
 Requires-Dist: opencv-python>=4.10.0; extra == "captcha-ocr"
-Requires-Dist: rapidocr-onnxruntime>=1.3.24; extra == "captcha-ocr"
+Requires-Dist: rapidocr-onnxruntime>=1.3.24; python_version < "3.13" and extra == "captcha-ocr"
+Requires-Dist: rapidocr-onnxruntime<1.3.0,>=1.2.3; python_version >= "3.13" and extra == "captcha-ocr"
 Provides-Extra: browser
 Requires-Dist: playwright-stealth>=2.0.0; extra == "browser"
 Provides-Extra: captcha
