@@ -1,3 +1,6 @@
 [console_scripts]
 weboter = weboter.cli:main
 weboter-mcp = weboter.mcp.server:main
+
+[weboter.plugins]
+captcha_ocr = weboter_captcha_plugin

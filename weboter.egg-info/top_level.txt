@@ -1,1 +1,2 @@
 weboter
+weboter_captcha_plugin

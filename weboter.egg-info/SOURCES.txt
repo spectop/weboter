@@ -2,6 +2,7 @@ LICENSE
 README.md
 pyproject.toml
 tests/test_builtin_controls.py
+tests/test_captcha_ocr_plugin.py
 tests/test_contract_catalog.py
 tests/test_managed_env.py
 tests/test_mqtt_plugin.py
@@ -65,3 +66,5 @@ weboter/public/contracts/io_pipe.py
 weboter/public/contracts/utils.py
 weboter/public/model/__init__.py
 weboter/public/model/model.py
+weboter_captcha_plugin/__init__.py
+weboter_captcha_plugin/actions.py

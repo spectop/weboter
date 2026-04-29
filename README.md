@@ -40,6 +40,7 @@ playwright install-deps
 python -m pip install -e '.[service,browser]'
 python -m pip install -e '.[service,captcha]'
 python -m pip install -e '.[service,mqtt]'
+python -m pip install -e '.[service,captcha_ocr]'
 ```
 
 默认情况下，Weboter 会优先读取仓库根目录下的 `weboter.yaml` 作为统一配置文件；如果需要使用其他位置的配置文件，可以通过 `weboter --config /path/to/weboter.yaml ...` 指定。仓库根目录现在提供了一份默认样例 [weboter.yaml](weboter.yaml)。
@@ -61,6 +62,13 @@ python -m pip install -e '.[service,mqtt]'
 
 - 目录插件：放在 `paths.PLUGIN_ROOT` 下，每个子目录一个插件包（结构类似 builtin，提供 `package_name`、`actions`、`controls`）
 - 安装插件：安装形如 `weboter-http` 的分发包后，执行刷新即可加载（支持 `weboter.plugins` entry point，或 `weboter-*` 分发自动发现）
+
+当前仓库还提供一个重依赖验证码插件：
+
+- `captcha_ocr.OcrReadText`：对页面区域执行 OCR
+- `captcha_ocr.ClickTextOrderCaptcha`：读取提示词并按顺序点选验证码文字
+
+这类 OCR/视觉能力默认拆为插件，以避免持续扩大 builtin 依赖面。
 
 刷新方式：
 

@@ -57,6 +57,12 @@ Panel/Service 上传插件 zip 时必须满足：
 - 插件加载失败不应导致 builtin 整体不可用。
 - 新增插件能力若影响 catalog 字段，必须同步更新 `doc/interfaces/service.md` 和 `doc/interfaces/mcp.md`。
 
+对于依赖较重的能力（例如 OCR、视觉验证码、机器学习推理），优先以插件形式提供，而不是继续扩大 builtin 依赖面。推荐做法：
+
+- builtin 仅保留轻量且高度通用的基础能力。
+- 重依赖能力通过目录插件或 `weboter.plugins` entry point 注入。
+- 插件缺失依赖时，应只影响该插件本身，不影响 builtin 与其他插件加载。
+
 ## 7. 变更要求
 
 下列变更必须先更新本文件：
