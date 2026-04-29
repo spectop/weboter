@@ -8,6 +8,9 @@ playwright-stealth>=2.0.0
 numpy>=2.0.0
 opencv-python>=4.10.0
 
+[mqtt]
+paho-mqtt>=1.6.1
+
 [service]
 fastapi>=0.116.0
 python-multipart>=0.0.9

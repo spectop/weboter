@@ -39,6 +39,7 @@ playwright install-deps
 ```bash
 python -m pip install -e '.[service,browser]'
 python -m pip install -e '.[service,captcha]'
+python -m pip install -e '.[service,mqtt]'
 ```
 
 默认情况下，Weboter 会优先读取仓库根目录下的 `weboter.yaml` 作为统一配置文件；如果需要使用其他位置的配置文件，可以通过 `weboter --config /path/to/weboter.yaml ...` 指定。仓库根目录现在提供了一份默认样例 [weboter.yaml](weboter.yaml)。
@@ -65,6 +66,28 @@ python -m pip install -e '.[service,captcha]'
 
 - CLI：`weboter service refresh-plugins`
 - MCP：`plugin_refresh`
+
+### MQTT 插件（新增）
+
+仓库内置目录插件 `plugins/mqtt`，提供以下 action：
+
+- `mqtt.MqttPublish`：连接并发布消息（支持 JSON / raw、QoS、retain、用户名密码、TLS）
+- `mqtt.MqttSubscribeOnce`：订阅主题并等待一条消息
+- `mqtt.MqttRequestReply`：请求主题发布 + 响应主题等待
+- `mqtt.MqttCheckConnection`：broker 连通性探活
+
+针对 `state-grid` 的最小需求（向 Home Assistant 发布 JSON）可直接参考：
+
+- 示例 workflow： [workflows/demo_mqtt_publish_state_grid.json](workflows/demo_mqtt_publish_state_grid.json)
+- 默认 topic：`nodejs/state-grid`
+- 多户号 topic：`nodejs/state-grid/{consNo}`
+
+建议把 broker 配置放进受管环境变量：
+
+- `$env{mqtt.host}`
+- `$env{mqtt.port}`
+- `$env{mqtt.username}`
+- `$env{mqtt.password}`
 
 ## 快速开始
 

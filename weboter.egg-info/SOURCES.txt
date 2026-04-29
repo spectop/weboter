@@ -3,6 +3,7 @@ README.md
 pyproject.toml
 tests/test_contract_catalog.py
 tests/test_managed_env.py
+tests/test_mqtt_plugin.py
 tests/test_service_control.py
 tests/test_session_debug.py
 tests/test_workflow_edit.py
