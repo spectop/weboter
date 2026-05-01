@@ -627,6 +627,65 @@ class PyEvalAction(ActionBase):
         result = eval(expr, {}, local_context)
         io.outputs["result"] = result
 
+class SetData(ActionBase):
+    """Action to set runtime data by variable key."""
+    name: str = "SetData"
+    description: str = "Set runtime data into env/global/flow/prev_outputs/cur_outputs by key"
+    inputs: list[InputFieldDeclaration] = [
+        InputFieldDeclaration(
+            name="key",
+            description="The destination variable key, e.g. $flow{order.id}",
+            required=True,
+            accepted_types=["string"]
+        ),
+        InputFieldDeclaration(
+            name="value",
+            description="The value to store, supports any JSON-like type",
+            required=False,
+            accepted_types=["any"],
+            default=None
+        )
+    ]
+    outputs: list[OutputFieldDeclaration] = [
+        OutputFieldDeclaration(
+            name="key",
+            description="The written key",
+            type="string"
+        ),
+        OutputFieldDeclaration(
+            name="value",
+            description="The written value",
+            type="any"
+        )
+    ]
+
+    @staticmethod
+    def _is_var_key(key: str) -> bool:
+        if not isinstance(key, str):
+            return False
+        if not key.startswith("$"):
+            return False
+        if "{" not in key or "}" not in key:
+            return False
+        return True
+
+    async def execute(self, io: IOPipe):
+        key = io.inputs.get("key")
+        if not key:
+            raise ValueError("Input 'key' is required.")
+        if not self._is_var_key(key):
+            raise ValueError(f"Input 'key' must be a variable reference like $flow{{name}}: {key}")
+
+        executor = io.executor
+        if not executor or not hasattr(executor, "runtime") or not hasattr(executor.runtime, "set_value"):
+            raise ValueError("Executor runtime with 'set_value' is required for SetData action.")
+
+        value = io.inputs.get("value", None)
+        executor.runtime.set_value(key, value)
+
+        io.outputs["key"] = key
+        io.outputs["value"] = value
+
 class WriteTextFile(ActionBase):
     """Action to write text content to a file."""
     name: str = "WriteTextFile"

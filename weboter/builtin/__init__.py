@@ -53,6 +53,7 @@ actions = [
     basic_action.GetElement,
     basic_action.NextElement,
     basic_action.PyEvalAction,
+    basic_action.SetData,
     basic_action.WriteTextFile,
     basic_action.FetchUrl,
 ]

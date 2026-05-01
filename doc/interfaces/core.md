@@ -116,6 +116,22 @@ builtin 包提供通用控制流能力，默认至少包含：
 - 涉及 OCR、视觉模型、机器学习推理等重依赖能力时，优先拆分为 plugin，而不是直接扩大 builtin 依赖集合。
 - 若 builtin 已存在可选重依赖能力，新能力默认不继续沿用该模式扩张，除非它明显属于所有工作流都会复用的基础闭环。
 
+### 3.5 builtin.SetData（Evolving）
+
+文件：`weboter/builtin/basic_action.py`
+
+语义：
+
+- `SetData` 用于在运行时上下文写入任意类型值。
+- 通过 `key` 指定目标变量，格式必须为 `$scope{name}`。
+- 支持的 scope 与运行时一致：`env`、`global`、`flow`、`prev_outputs`、`cur_outputs`。
+
+约束：
+
+- `key` 必须符合变量引用格式；不合法时抛出错误。
+- `value` 支持任意 JSON 可表达类型（字符串、数字、布尔、对象、数组、null）。
+- `SetData` 仅负责写入运行时，不负责节点 `outputs` 的转储策略。
+
 ## 4. 禁止跨层依赖
 
 - `public` 禁止依赖 `core/app/mcp` 任何实现。
