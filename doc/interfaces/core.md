@@ -132,6 +132,24 @@ builtin 包提供通用控制流能力，默认至少包含：
 - `value` 支持任意 JSON 可表达类型（字符串、数字、布尔、对象、数组、null）。
 - `SetData` 仅负责写入运行时，不负责节点 `outputs` 的转储策略。
 
+### 3.6 SubFlow 可见性（Evolving）
+
+文件：`weboter/core/engine/excutor.py`
+
+语义：
+
+- `SubFlow(flow_id=...)` 的解析遵循作用域可见性，而不是全局递归搜索。
+- 当前流程可以访问：
+  - 当前流程直属 `sub_flows`
+  - 所有上级流程的直属 `sub_flows`（包含同级流程）
+- 不可访问：同级流程的内部子流程（跨作用域子孙不可见）。
+
+示例：
+
+- `Main` 包含 `SubA`、`SubB`，且 `SubA` 包含 `SubC`。
+- 在 `SubB` 内可调用 `SubA`（上级的直属子流程）。
+- 在 `SubB` 内不可直接调用 `SubC`（`SubC` 属于 `SubA` 私有作用域）。
+
 ## 4. 禁止跨层依赖
 
 - `public` 禁止依赖 `core/app/mcp` 任何实现。

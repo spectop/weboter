@@ -9,6 +9,7 @@ tests/test_managed_env.py
 tests/test_mqtt_plugin.py
 tests/test_service_control.py
 tests/test_session_debug.py
+tests/test_subflow_visibility.py
 tests/test_workflow_edit.py
 weboter/__main__.py
 weboter/cli.py

@@ -15,6 +15,10 @@ class Executor:
         self.workflow: Flow | None = None
         self.action_manager = action_manager
         self.control_manager = control_manager
+        self._ancestor_subflow_scopes: list[dict[str, Flow]] = [
+            dict(scope) for scope in kwargs.get("ancestor_subflow_scopes", [])
+        ]
+        self._current_subflow_scope: dict[str, Flow] = {}
         
         logger = kwargs.get("logger", None)
         self.hooks = kwargs.get("hooks")
@@ -27,6 +31,7 @@ class Executor:
     def load_workflow(self, flow: Flow):
         self.workflow = flow
         self.runtime.init_with_flow(flow)
+        self._current_subflow_scope = {sub_flow.flow_id: sub_flow for sub_flow in flow.sub_flows}
         
         # 创建 logger
         if self.logger is None:
@@ -178,12 +183,27 @@ class Executor:
         if self.hooks and hasattr(self.hooks, "on_finished"):
             await self.hooks.on_finished(self)
 
+    def _iter_visible_subflow_scopes(self):
+        # 可见性规则：优先当前作用域，其次最近上级作用域，逐层向上。
+        if self._current_subflow_scope:
+            yield self._current_subflow_scope
+        for scope in reversed(self._ancestor_subflow_scopes):
+            if scope:
+                yield scope
+
     def get_subflow(self, flow_id: str) -> Flow:
         if not self.workflow:
             raise ValueError("No workflow loaded")
-        for sub_flow in self.workflow.sub_flows:
-            if sub_flow.flow_id == flow_id:
-                return sub_flow
+        for scope in self._iter_visible_subflow_scopes():
+            if flow_id in scope:
+                return scope[flow_id]
+        visible_flow_ids: list[str] = []
+        for scope in self._iter_visible_subflow_scopes():
+            visible_flow_ids.extend(scope.keys())
+        if visible_flow_ids:
+            raise ValueError(
+                f"Sub flow '{flow_id}' not found in visible scopes. visible={sorted(set(visible_flow_ids))}"
+            )
         raise ValueError(f"Sub flow '{flow_id}' not found")
         
     async def sub_flow_func(self, io: IOPipeImpl):
@@ -193,10 +213,15 @@ class Executor:
 
         self.logger.info(f'   Starting sub flow with ID: {flow_id} >>>>>>>>')
         self.logger.info('')
+        child_ancestor_scopes = [
+            *self._ancestor_subflow_scopes,
+            dict(self._current_subflow_scope),
+        ]
         executor = Executor(
             logger=self.logger,
             hooks=self.hooks,
             managed_env=self.runtime.data_context.data.get("env", {}),
+            ancestor_subflow_scopes=child_ancestor_scopes,
         )
         flow = self.get_subflow(flow_id)
         if not flow:
